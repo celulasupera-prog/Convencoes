@@ -16,27 +16,31 @@ export class ScraperService {
   @Cron(CronExpression.EVERY_DAY_AT_MIDNIGHT)
   async enqueueActiveCnpjs() {
     this.logger.log('Starting daily scraper enqueue job...');
+    try {
+      const run = await this.prisma.searchRun.create({
+        data: { status: 'RUNNING' },
+      });
 
-    const run = await this.prisma.searchRun.create({
-      data: { status: 'RUNNING' }
-    });
+      const activeCnpjs = await this.prisma.trackedCnpj.findMany({
+        where: { isActive: true },
+      });
 
-    const activeCnpjs = await this.prisma.trackedCnpj.findMany({
-      where: { isActive: true },
-    });
+      for (const tracked of activeCnpjs) {
+        await this.scraperQueue.add(
+          'scrape-cnpj',
+          { cnpj: tracked.cnpj, runId: run.id },
+          {
+            jobId: `run-${run.id}-cnpj-${tracked.cnpj}`,
+            attempts: 3,
+            backoff: { type: 'exponential', delay: 5000 },
+          },
+        );
+      }
 
-    for (const tracked of activeCnpjs) {
-      await this.scraperQueue.add(
-        'scrape-cnpj',
-        { cnpj: tracked.cnpj, runId: run.id },
-        { 
-          jobId: `run-${run.id}-cnpj-${tracked.cnpj}`,
-          attempts: 3, 
-          backoff: { type: 'exponential', delay: 5000 }
-        },
-      );
+      this.logger.log(`Enqueued ${activeCnpjs.length} CNPJs for processing.`);
+    } catch (err: any) {
+      this.logger.warn(`Scraper cron skipped – Redis unavailable: ${err.message}`);
     }
-    
-    this.logger.log(`Enqueued ${activeCnpjs.length} CNPJs for processing.`);
   }
 }
+
