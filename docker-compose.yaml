@@ -1,0 +1,46 @@
+version: '3.8'
+
+services:
+  postgres:
+    image: postgres:15
+    container_name: mte_postgres
+    environment:
+      POSTGRES_USER: root
+      POSTGRES_PASSWORD: rootpassword
+      POSTGRES_DB: mte_monitoring
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    restart: always
+
+  pgadmin:
+    image: dpage/pgadmin4
+    container_name: mte_pgadmin
+    environment:
+      PGADMIN_DEFAULT_EMAIL: admin@mte.com
+      PGADMIN_DEFAULT_PASSWORD: admin
+    ports:
+      - "5050:80"
+    depends_on:
+      - postgres
+    restart: always
+
+  redis:
+    image: redis:7-alpine
+    container_name: mte_redis
+    ports:
+      - "6379:6379"
+    restart: always
+
+  redis-insight:
+    image: redislabs/redisinsight:latest
+    container_name: mte_redisinsight
+    ports:
+      - "8001:8001"
+    depends_on:
+      - redis
+    restart: always
+
+volumes:
+  postgres_data:
