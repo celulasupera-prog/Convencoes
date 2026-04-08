@@ -38,6 +38,7 @@ export class ScraperProcessor {
 
       await page.waitForSelector('#nrCNPJ', { timeout: 30000 });
       await page.fill('#nrCNPJ', tracked.cnpj.replace(/\D/g, ''));
+      await this.selectAllValidity(page);
       await page.click('input[name="btnPesquisar"]');
       await page.waitForLoadState('networkidle', { timeout: 30000 }).catch(
         () => undefined,
@@ -78,7 +79,7 @@ export class ScraperProcessor {
 
   private async extractResultLinks(page: Page) {
     const hrefs = await page
-      .locator('a[href*="Resumo/ResumoVisualizar"]')
+      .locator('a[href*="Resumo/ResumoVisualizar"], a[href*="resumo/resumovisualizar"]')
       .evaluateAll((links: HTMLAnchorElement[]) =>
         links
           .map((link) => link.href)
@@ -92,10 +93,53 @@ export class ScraperProcessor {
 
     const html = await page.content();
     const matches = html.match(
-      /https:\/\/www3\.mte\.gov\.br\/sistemas\/mediador\/Resumo\/ResumoVisualizar[^"'\\s<>]*/g,
+      /(?:https?:\/\/www3\.mte\.gov\.br)?\/sistemas\/mediador\/(?:Resumo\/ResumoVisualizar|resumo\/resumovisualizar)[^"'\\s<>]*/gi,
     );
 
-    return Array.from(new Set(matches ?? []));
+    return Array.from(
+      new Set(
+        (matches ?? []).map((match) =>
+          match.startsWith('http')
+            ? match
+            : new URL(match, 'https://www3.mte.gov.br').toString(),
+        ),
+      ),
+    );
+  }
+
+  private async selectAllValidity(page: Page) {
+    const selected = await page.evaluate(() => {
+      const selects = Array.from(document.querySelectorAll('select'));
+      const target = selects.find((select) => {
+        const labels = Array.from(select.options).map((option) =>
+          option.textContent?.trim().toLowerCase() ?? '',
+        );
+
+        return (
+          labels.some((label) => label === 'todos') &&
+          labels.some((label) => label.includes('vigentes'))
+        );
+      });
+
+      if (!target) {
+        return false;
+      }
+
+      const option =
+        Array.from(target.options).find(
+          (item) => item.textContent?.trim().toLowerCase() === 'todos',
+        ) ?? target.options[0];
+
+      target.value = option.value;
+      target.dispatchEvent(new Event('input', { bubbles: true }));
+      target.dispatchEvent(new Event('change', { bubbles: true }));
+
+      return true;
+    });
+
+    if (!selected) {
+      this.logger.warn('Validity filter select not found; continuing with portal defaults.');
+    }
   }
 
   private async parseDetailPage(
