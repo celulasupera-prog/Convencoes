@@ -1,0 +1,37 @@
+databases:
+  - name: convencoes-db
+    plan: free
+    databaseName: convencoes
+    user: convencoes_user
+
+services:
+  - type: web
+    name: convencoes-backend
+    runtime: node
+    plan: free
+    rootDir: backend
+    buildCommand: npm install && npm run render-build
+    startCommand: npm run start:prod
+    healthCheckPath: /
+    envVars:
+      - key: NODE_VERSION
+        value: 22
+      - key: DATABASE_URL
+        fromDatabase:
+          name: convencoes-db
+          property: connectionString
+      - key: JWT_SECRET
+        generateValue: true
+
+  - type: web
+    name: convencoes-frontend
+    runtime: node
+    plan: free
+    rootDir: frontend
+    buildCommand: npm install && npm run build
+    startCommand: npm run start
+    envVars:
+      - key: NODE_VERSION
+        value: 22
+      - key: NEXT_PUBLIC_API_URL
+        sync: false
