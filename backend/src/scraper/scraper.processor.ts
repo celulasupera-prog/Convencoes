@@ -47,10 +47,9 @@ export class ScraperProcessor {
       const usedUrl = await this.openMediatorSearchPage(page);
       this.logger.log(`Mediator loaded from ${usedUrl}`);
 
-      await page.waitForSelector('#nrCNPJ', { timeout: 30000 });
-      await page.fill('#nrCNPJ', tracked.cnpj.replace(/\D/g, ''));
+      await this.fillCnpjField(page, tracked.cnpj.replace(/\D/g, ''));
       await this.selectAllValidity(page);
-      await page.click('input[name="btnPesquisar"]');
+      await this.submitSearch(page);
       await page.waitForLoadState('networkidle', { timeout: 30000 }).catch(
         () => undefined,
       );
@@ -138,36 +137,200 @@ export class ScraperProcessor {
 
   private async selectAllValidity(page: Page) {
     const selected = await page.evaluate(() => {
-      const selects = Array.from(document.querySelectorAll('select'));
-      const target = selects.find((select) => {
-        const labels = Array.from(select.options).map((option) =>
-          option.textContent?.trim().toLowerCase() ?? '',
+      const normalize = (value: string | null | undefined) =>
+        (value ?? '')
+          .normalize('NFD')
+          .replace(/\p{Diacritic}/gu, '')
+          .toLowerCase()
+          .trim();
+
+      const labels = Array.from(document.querySelectorAll('label'));
+
+      for (const label of labels) {
+        if (!normalize(label.textContent).includes('vigencia')) {
+          continue;
+        }
+
+        const htmlFor = label.getAttribute('for');
+        const relatedByFor = htmlFor
+          ? document.getElementById(htmlFor)
+          : null;
+        const relatedByContainer = label.parentElement?.querySelector('select');
+        const target =
+          (relatedByFor instanceof HTMLSelectElement ? relatedByFor : null) ??
+          (relatedByContainer instanceof HTMLSelectElement
+            ? relatedByContainer
+            : null);
+
+        if (!target) {
+          continue;
+        }
+
+        const option = Array.from(target.options).find(
+          (item) => normalize(item.textContent) === 'todos',
         );
 
-        return (
-          labels.some((label) => label === 'todos') &&
-          labels.some((label) => label.includes('vigentes'))
-        );
-      });
+        if (!option) {
+          continue;
+        }
 
-      if (!target) {
+        target.value = option.value;
+        target.dispatchEvent(new Event('input', { bubbles: true }));
+        target.dispatchEvent(new Event('change', { bubbles: true }));
+        return true;
+      }
+
+      const fallback = Array.from(document.querySelectorAll('select')).find(
+        (select) => {
+          const labels = Array.from(select.options).map((option) =>
+            normalize(option.textContent),
+          );
+
+          return (
+            labels.includes('todos') &&
+            labels.includes('vigentes') &&
+            labels.includes('nao vigentes')
+          );
+        },
+      );
+
+      if (!(fallback instanceof HTMLSelectElement)) {
         return false;
       }
 
-      const option =
-        Array.from(target.options).find(
-          (item) => item.textContent?.trim().toLowerCase() === 'todos',
-        ) ?? target.options[0];
+      const option = Array.from(fallback.options).find(
+        (item) => normalize(item.textContent) === 'todos',
+      );
 
-      target.value = option.value;
-      target.dispatchEvent(new Event('input', { bubbles: true }));
-      target.dispatchEvent(new Event('change', { bubbles: true }));
+      if (!option) {
+        return false;
+      }
+
+      fallback.value = option.value;
+      fallback.dispatchEvent(new Event('input', { bubbles: true }));
+      fallback.dispatchEvent(new Event('change', { bubbles: true }));
 
       return true;
     });
 
     if (!selected) {
       this.logger.warn('Validity filter select not found; continuing with portal defaults.');
+    }
+  }
+
+  private async fillCnpjField(page: Page, cnpj: string) {
+    const filledByLabel = await page
+      .getByLabel(/CNPJ/i)
+      .fill(cnpj)
+      .then(() => true)
+      .catch(() => false);
+
+    if (filledByLabel) {
+      return;
+    }
+
+    const filledByDom = await page.evaluate((cnpjValue) => {
+      const normalize = (value: string | null | undefined) =>
+        (value ?? '')
+          .normalize('NFD')
+          .replace(/\p{Diacritic}/gu, '')
+          .toLowerCase()
+          .trim();
+
+      const labels = Array.from(document.querySelectorAll('label'));
+
+      for (const label of labels) {
+        if (normalize(label.textContent) !== 'cnpj:') {
+          continue;
+        }
+
+        const htmlFor = label.getAttribute('for');
+        const relatedByFor = htmlFor
+          ? document.getElementById(htmlFor)
+          : null;
+        const relatedByContainer = label.parentElement?.querySelector('input');
+        const target =
+          (relatedByFor instanceof HTMLInputElement ? relatedByFor : null) ??
+          (relatedByContainer instanceof HTMLInputElement
+            ? relatedByContainer
+            : null);
+
+        if (!target) {
+          continue;
+        }
+
+        target.value = cnpjValue;
+        target.dispatchEvent(new Event('input', { bubbles: true }));
+        target.dispatchEvent(new Event('change', { bubbles: true }));
+        return true;
+      }
+
+      const fallback = Array.from(
+        document.querySelectorAll('input[type="text"], input:not([type])'),
+      ).find((input) => {
+        const element = input as HTMLInputElement;
+        const attrs = [
+          element.name,
+          element.id,
+          element.getAttribute('placeholder'),
+          element.getAttribute('aria-label'),
+        ]
+          .map(normalize)
+          .join(' ');
+
+        return attrs.includes('cnpj');
+      }) as HTMLInputElement | undefined;
+
+      if (!fallback) {
+        return false;
+      }
+
+      fallback.value = cnpjValue;
+      fallback.dispatchEvent(new Event('input', { bubbles: true }));
+      fallback.dispatchEvent(new Event('change', { bubbles: true }));
+      return true;
+    }, cnpj);
+
+    if (!filledByDom) {
+      throw new Error('CNPJ field not found on Mediador page');
+    }
+  }
+
+  private async submitSearch(page: Page) {
+    const clickedByRole = await page
+      .getByRole('button', { name: /Pesquisar/i })
+      .click()
+      .then(() => true)
+      .catch(() => false);
+
+    if (clickedByRole) {
+      return;
+    }
+
+    const clickedByDom = await page.evaluate(() => {
+      const candidates = Array.from(
+        document.querySelectorAll('input[type="submit"], button, input[type="button"]'),
+      );
+
+      const target = candidates.find((element) =>
+        /pesquisar/i.test(
+          (element.textContent ?? '') ||
+            element.getAttribute('value') ||
+            element.getAttribute('aria-label') ||
+            '',
+        ),
+      ) as HTMLButtonElement | HTMLInputElement | undefined;
+
+      if (!target) {
+        return false;
+      }
+
+      target.click();
+      return true;
+    });
+
+    if (!clickedByDom) {
+      throw new Error('Search button not found on Mediador page');
     }
   }
 
