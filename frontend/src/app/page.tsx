@@ -19,7 +19,8 @@ export default function LoginPage() {
     try {
       await login(email, password)
       toast.success('Login realizado com sucesso!')
-    } catch (err: any) {
+    } catch (err: unknown) {
+      // @ts-expect-error temporary login error shape handling
       const msg = err?.response?.data?.message || 'Credenciais inválidas'
       toast.error(msg)
     } finally {

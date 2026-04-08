@@ -1,6 +1,6 @@
 'use client'
 
-import { Home, List, Briefcase, Settings, LogOut } from 'lucide-react'
+import { List, Briefcase, Settings, LogOut } from 'lucide-react'
 import {
   Sidebar,
   SidebarContent,

@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -37,11 +37,11 @@ export default function Dashboard() {
   const [page, setPage] = useState(0)
   const PAGE_SIZE = 9
 
-  async function fetchInstruments(reset = false) {
+  const fetchInstruments = useCallback(async (reset = false) => {
     setLoading(true)
     try {
       const currentPage = reset ? 0 : page
-      const params: Record<string, any> = {
+      const params: Record<string, string | number> = {
         skip: currentPage * PAGE_SIZE,
         take: PAGE_SIZE,
       }
@@ -57,9 +57,9 @@ export default function Dashboard() {
     } finally {
       setLoading(false)
     }
-  }
+  }, [page, search])
 
-  useEffect(() => { fetchInstruments() }, [page])
+  useEffect(() => { fetchInstruments() }, [fetchInstruments])
 
   function handleSearch(e: React.FormEvent) {
     e.preventDefault()

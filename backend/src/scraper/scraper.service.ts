@@ -1,46 +1,212 @@
-import { Injectable, Logger } from '@nestjs/common';
+import {
+  ConflictException,
+  Injectable,
+  Logger,
+  NotFoundException,
+} from '@nestjs/common';
 import { Cron, CronExpression } from '@nestjs/schedule';
-import { InjectQueue } from '@nestjs/bullmq';
-import { Queue } from 'bullmq';
 import { PrismaService } from '../prisma/prisma.service';
+import { ScraperProcessor } from './scraper.processor';
 
 @Injectable()
 export class ScraperService {
   private readonly logger = new Logger(ScraperService.name);
 
   constructor(
-    @InjectQueue('scraper') private scraperQueue: Queue,
     private prisma: PrismaService,
+    private scraperProcessor: ScraperProcessor,
   ) {}
 
   @Cron(CronExpression.EVERY_DAY_AT_MIDNIGHT)
   async enqueueActiveCnpjs() {
-    this.logger.log('Starting daily scraper enqueue job...');
+    this.logger.log('Starting daily scraper job...');
     try {
-      const run = await this.prisma.searchRun.create({
-        data: { status: 'RUNNING' },
-      });
-
-      const activeCnpjs = await this.prisma.trackedCnpj.findMany({
+      const organizations = await this.prisma.trackedCnpj.findMany({
         where: { isActive: true },
+        select: { organizationId: true },
+        distinct: ['organizationId'],
       });
 
-      for (const tracked of activeCnpjs) {
-        await this.scraperQueue.add(
-          'scrape-cnpj',
-          { cnpj: tracked.cnpj, runId: run.id },
-          {
-            jobId: `run-${run.id}-cnpj-${tracked.cnpj}`,
-            attempts: 3,
-            backoff: { type: 'exponential', delay: 5000 },
-          },
-        );
+      for (const item of organizations) {
+        await this.startRunForOrganization(item.organizationId, 'cron');
       }
-
-      this.logger.log(`Enqueued ${activeCnpjs.length} CNPJs for processing.`);
     } catch (err: any) {
       this.logger.warn(`Scraper cron skipped – Redis unavailable: ${err.message}`);
     }
   }
-}
 
+  async startManualRun(userId: string) {
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: { organizationId: true },
+    });
+
+    if (!user?.organizationId) {
+      throw new NotFoundException('Usuario sem organizacao associada');
+    }
+
+    const run = await this.startRunForOrganization(user.organizationId, userId);
+
+    return {
+      id: run.id,
+      status: run.status,
+      startedAt: run.startedAt,
+      message: 'Varredura iniciada com sucesso',
+    };
+  }
+
+  async listRuns() {
+    return this.prisma.searchRun.findMany({
+      orderBy: { startedAt: 'desc' },
+      take: 10,
+    });
+  }
+
+  async findRun(id: string) {
+    const run = await this.prisma.searchRun.findUnique({
+      where: { id },
+    });
+
+    if (!run) {
+      throw new NotFoundException('Execucao nao encontrada');
+    }
+
+    return run;
+  }
+
+  private async startRunForOrganization(
+    organizationId: string,
+    triggeredBy: string,
+  ) {
+    const running = await this.prisma.searchRun.findFirst({
+      where: {
+        status: 'RUNNING',
+        logs: {
+          contains: `organization:${organizationId}`,
+        },
+      },
+    });
+
+    if (running) {
+      throw new ConflictException('Ja existe uma varredura em andamento');
+    }
+
+    const activeCnpjs = await this.prisma.trackedCnpj.findMany({
+      where: {
+        organizationId,
+        isActive: true,
+      },
+      orderBy: { createdAt: 'asc' },
+    });
+
+    if (activeCnpjs.length === 0) {
+      throw new NotFoundException('Nenhum CNPJ ativo para monitorar');
+    }
+
+    const run = await this.prisma.searchRun.create({
+      data: {
+        status: 'RUNNING',
+        logs: [
+          `organization:${organizationId}`,
+          `triggeredBy:${triggeredBy}`,
+          `queued:${activeCnpjs.length}`,
+        ].join('\n'),
+      },
+    });
+
+    void this.executeRun(run.id, organizationId);
+
+    return run;
+  }
+
+  private async executeRun(runId: string, organizationId: string) {
+    const cnpjs = await this.prisma.trackedCnpj.findMany({
+      where: {
+        organizationId,
+        isActive: true,
+      },
+      orderBy: { createdAt: 'asc' },
+    });
+
+    const logLines = [`organization:${organizationId}`];
+    let newItems = 0;
+    let totalItems = 0;
+
+    try {
+      for (const tracked of cnpjs) {
+        logLines.push(`processing:${tracked.cnpj}`);
+
+        const items = await this.scraperProcessor.scrapeTrackedCnpj(tracked);
+        totalItems += items.length;
+
+        for (const item of items) {
+          const existing = await this.prisma.instrument.findUnique({
+            where: { externalId: item.externalId },
+          });
+
+          await this.prisma.instrument.upsert({
+            where: { externalId: item.externalId },
+            update: {
+              type: item.type,
+              registerDate: item.registerDate,
+              validityStart: item.validityStart,
+              validityEnd: item.validityEnd,
+              uf: item.uf,
+              documentLink: item.documentLink,
+              contentSummary: item.contentSummary,
+              isNew: false,
+              parties: {
+                deleteMany: {},
+                create: item.parties,
+              },
+            },
+            create: {
+              externalId: item.externalId,
+              type: item.type,
+              registerDate: item.registerDate,
+              validityStart: item.validityStart,
+              validityEnd: item.validityEnd,
+              uf: item.uf,
+              documentLink: item.documentLink,
+              contentSummary: item.contentSummary,
+              isNew: true,
+              parties: {
+                create: item.parties,
+              },
+            },
+          });
+
+          if (!existing) {
+            newItems += 1;
+          }
+        }
+
+        logLines.push(`processed:${tracked.cnpj}:items=${items.length}`);
+      }
+
+      logLines.push(`completed:new=${newItems}:total=${totalItems}`);
+
+      await this.prisma.searchRun.update({
+        where: { id: runId },
+        data: {
+          status: 'SUCCESS',
+          finishedAt: new Date(),
+          logs: logLines.join('\n'),
+        },
+      });
+    } catch (error: any) {
+      logLines.push(`failed:${error.message}`);
+
+      await this.prisma.searchRun.update({
+        where: { id: runId },
+        data: {
+          status: 'FAILED',
+          finishedAt: new Date(),
+          logs: logLines.join('\n'),
+        },
+      });
+
+      this.logger.error(`Run ${runId} failed: ${error.message}`);
+    }
+  }
+}

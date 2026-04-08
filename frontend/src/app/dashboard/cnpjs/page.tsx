@@ -12,7 +12,7 @@ import {
   DialogTitle,
   DialogDescription,
 } from '@/components/ui/dialog'
-import { Plus, Briefcase, Activity, Loader2 } from 'lucide-react'
+import { Plus, Briefcase, Activity, Loader2, Play, RefreshCw } from 'lucide-react'
 import api from '@/lib/api'
 import { toast } from 'sonner'
 
@@ -24,11 +24,21 @@ interface TrackedCnpj {
   updatedAt: string
 }
 
+interface SearchRun {
+  id: string
+  status: 'RUNNING' | 'SUCCESS' | 'FAILED'
+  startedAt: string
+  finishedAt?: string | null
+  logs?: string | null
+}
+
 export default function TrackedCnpjsPage() {
   const [cnpjs, setCnpjs] = useState<TrackedCnpj[]>([])
+  const [runs, setRuns] = useState<SearchRun[]>([])
   const [loading, setLoading] = useState(true)
   const [dialogOpen, setDialogOpen] = useState(false)
   const [saving, setSaving] = useState(false)
+  const [triggeringRun, setTriggeringRun] = useState(false)
   const [newCnpj, setNewCnpj] = useState({ cnpj: '', name: '' })
 
   async function fetchCnpjs() {
@@ -43,7 +53,31 @@ export default function TrackedCnpjsPage() {
     }
   }
 
-  useEffect(() => { fetchCnpjs() }, [])
+  async function fetchRuns() {
+    try {
+      const { data } = await api.get('/scraper/runs')
+      setRuns(data)
+    } catch {
+      toast.error('Erro ao carregar execucoes')
+    }
+  }
+
+  useEffect(() => {
+    fetchCnpjs()
+    fetchRuns()
+  }, [])
+
+  useEffect(() => {
+    const hasRunning = runs.some((run) => run.status === 'RUNNING')
+    if (!hasRunning) return
+
+    const interval = window.setInterval(() => {
+      fetchRuns()
+      fetchCnpjs()
+    }, 5000)
+
+    return () => window.clearInterval(interval)
+  }, [runs])
 
   async function handleToggle(item: TrackedCnpj) {
     try {
@@ -69,14 +103,30 @@ export default function TrackedCnpjsPage() {
       setDialogOpen(false)
       setNewCnpj({ cnpj: '', name: '' })
       fetchCnpjs()
-    } catch (err: any) {
-      toast.error(err?.response?.data?.message || 'Erro ao adicionar CNPJ')
+    } catch {
+      toast.error('Erro ao adicionar CNPJ')
     } finally {
       setSaving(false)
     }
   }
 
+  async function handleRun() {
+    setTriggeringRun(true)
+    try {
+      await api.post('/scraper/runs')
+      toast.success('Varredura iniciada com sucesso!')
+      fetchRuns()
+    } catch {
+      toast.error('Erro ao iniciar varredura')
+    } finally {
+      setTriggeringRun(false)
+    }
+  }
+
   const formatDate = (d: string) => new Date(d).toLocaleString('pt-BR')
+  const latestRun = runs[0]
+  const hasRunning = runs.some((run) => run.status === 'RUNNING')
+  const latestLogLine = latestRun?.logs?.split('\n').filter(Boolean).at(-1)
 
   return (
     <div className="space-y-6">
@@ -85,10 +135,56 @@ export default function TrackedCnpjsPage() {
           <h2 className="text-3xl font-heading font-bold tracking-tight">CNPJs Monitorados</h2>
           <p className="text-muted-foreground mt-1">Gerencie as empresas acompanhadas no Mediador MTE.</p>
         </div>
-        <Button className="font-semibold" onClick={() => setDialogOpen(true)}>
-          <Plus className="w-4 h-4 mr-2" /> Adicionar CNPJ
-        </Button>
+        <div className="flex gap-2">
+          <Button
+            variant="outline"
+            className="font-semibold"
+            onClick={handleRun}
+            disabled={triggeringRun || hasRunning}
+          >
+            {triggeringRun || hasRunning ? (
+              <><Loader2 className="w-4 h-4 mr-2 animate-spin" /> Varredura em andamento</>
+            ) : (
+              <><Play className="w-4 h-4 mr-2" /> Executar varredura</>
+            )}
+          </Button>
+          <Button className="font-semibold" onClick={() => setDialogOpen(true)}>
+            <Plus className="w-4 h-4 mr-2" /> Adicionar CNPJ
+          </Button>
+        </div>
       </div>
+
+      <Card className="border-border/60 bg-card/80">
+        <CardHeader className="pb-3">
+          <CardTitle className="text-lg font-heading">Status da Varredura</CardTitle>
+        </CardHeader>
+        <CardContent className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+          <div className="space-y-1">
+            <div className="flex items-center gap-2">
+              <Badge variant={latestRun?.status === 'FAILED' ? 'destructive' : latestRun?.status === 'SUCCESS' ? 'default' : 'secondary'}>
+                {latestRun?.status === 'RUNNING'
+                  ? 'Em execucao'
+                  : latestRun?.status === 'SUCCESS'
+                    ? 'Concluida'
+                    : latestRun?.status === 'FAILED'
+                      ? 'Falhou'
+                      : 'Sem execucao'}
+              </Badge>
+              {latestRun?.startedAt && (
+                <span className="text-sm text-muted-foreground">
+                  Inicio: {formatDate(latestRun.startedAt)}
+                </span>
+              )}
+            </div>
+            <p className="text-sm text-muted-foreground">
+              {latestLogLine || 'Nenhuma varredura executada ainda.'}
+            </p>
+          </div>
+          <Button variant="ghost" onClick={fetchRuns}>
+            <RefreshCw className="w-4 h-4 mr-2" /> Atualizar status
+          </Button>
+        </CardContent>
+      </Card>
 
       {loading ? (
         <div className="flex items-center justify-center py-32">

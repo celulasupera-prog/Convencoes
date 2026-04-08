@@ -1,14 +1,10 @@
 import { Module } from '@nestjs/common';
-import { BullModule } from '@nestjs/bullmq';
 import { ScraperService } from './scraper.service';
 import { ScraperProcessor } from './scraper.processor';
+import { ScraperController } from './scraper.controller';
 
 @Module({
-  imports: [
-    BullModule.registerQueue({
-      name: 'scraper',
-    }),
-  ],
+  controllers: [ScraperController],
   providers: [ScraperService, ScraperProcessor],
   exports: [ScraperService],
 })
