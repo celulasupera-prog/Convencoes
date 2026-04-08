@@ -11,6 +11,7 @@ import { ScraperProcessor } from './scraper.processor';
 @Injectable()
 export class ScraperService {
   private readonly logger = new Logger(ScraperService.name);
+  private readonly staleRunThresholdMs = 15 * 60 * 1000;
 
   constructor(
     private prisma: PrismaService,
@@ -76,6 +77,8 @@ export class ScraperService {
     const results: Array<{ organizationId: string; runId: string }> = [];
 
     for (const item of organizations) {
+      await this.forceFailRunningRuns(item.organizationId);
+
       const run = await this.startRunForOrganization(
         item.organizationId,
         'local-cli',
@@ -108,6 +111,8 @@ export class ScraperService {
     triggeredBy: string,
     waitForCompletion = false,
   ) {
+    await this.failStaleRunningRuns(organizationId);
+
     const running = await this.prisma.searchRun.findFirst({
       where: {
         status: 'RUNNING',
@@ -172,9 +177,32 @@ export class ScraperService {
         logLines.push(`processing:${tracked.cnpj}`);
         await this.persistRunLog(runId, logLines);
 
-        const items = await this.scraperProcessor.scrapeTrackedCnpj(tracked);
+        const scrapeResult = await this.scraperProcessor.scrapeTrackedCnpj(tracked);
+        const items = scrapeResult.items;
         totalItems += items.length;
         logLines.push(`result-links:${tracked.cnpj}:items=${items.length}`);
+        logLines.push(
+          `filled-field-strategy:${scrapeResult.diagnostics.filledFieldStrategy ?? 'unknown'}`,
+        );
+        logLines.push(
+          `submit-strategy:${scrapeResult.diagnostics.submitStrategy ?? 'unknown'}`,
+        );
+        logLines.push(`result-page-url:${scrapeResult.diagnostics.resultPageUrl}`);
+        logLines.push(`result-page-title:${scrapeResult.diagnostics.resultPageTitle}`);
+        logLines.push(
+          `result-page-links:${scrapeResult.diagnostics.detectedLinks.length}`,
+        );
+        if (scrapeResult.diagnostics.detectedLinks.length > 0) {
+          for (const link of scrapeResult.diagnostics.detectedLinks) {
+            logLines.push(`result-link:${link}`);
+          }
+        }
+        logLines.push(
+          `result-page-snippet:${scrapeResult.diagnostics.resultTextSnippet}`,
+        );
+        if (scrapeResult.diagnostics.formSnapshot) {
+          logLines.push(`form-snapshot:${scrapeResult.diagnostics.formSnapshot}`);
+        }
         await this.persistRunLog(runId, logLines);
 
         for (const item of items) {
@@ -251,6 +279,55 @@ export class ScraperService {
       });
 
       this.logger.error(`Run ${runId} failed: ${error.message}`);
+    }
+  }
+
+  private async failStaleRunningRuns(organizationId: string) {
+    const runningRuns = await this.prisma.searchRun.findMany({
+      where: {
+        status: 'RUNNING',
+        logs: {
+          contains: `organization:${organizationId}`,
+        },
+      },
+    });
+
+    const staleRuns = runningRuns.filter((run) => {
+      const startedAt = new Date(run.startedAt).getTime();
+      return Date.now() - startedAt > this.staleRunThresholdMs;
+    });
+
+    for (const run of staleRuns) {
+      await this.prisma.searchRun.update({
+        where: { id: run.id },
+        data: {
+          status: 'FAILED',
+          finishedAt: new Date(),
+          logs: `${run.logs ?? ''}\nforced-stop: stale run cleared automatically`,
+        },
+      });
+    }
+  }
+
+  private async forceFailRunningRuns(organizationId: string) {
+    const runningRuns = await this.prisma.searchRun.findMany({
+      where: {
+        status: 'RUNNING',
+        logs: {
+          contains: `organization:${organizationId}`,
+        },
+      },
+    });
+
+    for (const run of runningRuns) {
+      await this.prisma.searchRun.update({
+        where: { id: run.id },
+        data: {
+          status: 'FAILED',
+          finishedAt: new Date(),
+          logs: `${run.logs ?? ''}\nforced-stop: replaced by local cli run`,
+        },
+      });
     }
   }
 

@@ -18,6 +18,21 @@ type ParsedInstrument = {
   }>;
 };
 
+type ScrapeDiagnostics = {
+  resultPageUrl: string;
+  resultPageTitle: string;
+  resultTextSnippet: string;
+  detectedLinks: string[];
+  filledFieldStrategy?: string;
+  submitStrategy?: string;
+  formSnapshot?: string;
+};
+
+type ScrapeTrackedCnpjResult = {
+  items: ParsedInstrument[];
+  diagnostics: ScrapeDiagnostics;
+};
+
 @Injectable()
 export class ScraperProcessor {
   private readonly logger = new Logger(ScraperProcessor.name);
@@ -26,7 +41,9 @@ export class ScraperProcessor {
     'http://www3.mte.gov.br/sistemas/mediador/ConsultarInstColetivo',
   ];
 
-  async scrapeTrackedCnpj(tracked: TrackedCnpj): Promise<ParsedInstrument[]> {
+  async scrapeTrackedCnpj(
+    tracked: TrackedCnpj,
+  ): Promise<ScrapeTrackedCnpjResult> {
     let browser: Browser | null = null;
 
     try {
@@ -47,15 +64,24 @@ export class ScraperProcessor {
       const usedUrl = await this.openMediatorSearchPage(page);
       this.logger.log(`Mediator loaded from ${usedUrl}`);
 
-      await this.fillCnpjField(page, tracked.cnpj.replace(/\D/g, ''));
+      const filledFieldStrategy = await this.fillCnpjField(
+        page,
+        tracked.cnpj.replace(/\D/g, ''),
+      );
       await this.selectAllValidity(page);
-      await this.submitSearch(page);
+      const submitStrategy = await this.submitSearch(page);
       await page.waitForLoadState('networkidle', { timeout: 30000 }).catch(
         () => undefined,
       );
       await page.waitForTimeout(1500);
 
       const resultLinks = await this.extractResultLinks(page);
+      const diagnostics = await this.collectDiagnostics(
+        page,
+        resultLinks,
+        filledFieldStrategy,
+        submitStrategy,
+      );
       const parsedItems: ParsedInstrument[] = [];
 
       for (const link of resultLinks) {
@@ -76,7 +102,10 @@ export class ScraperProcessor {
         `Finished processing CNPJ ${tracked.cnpj} with ${parsedItems.length} item(s)`,
       );
 
-      return parsedItems;
+      return {
+        items: parsedItems,
+        diagnostics,
+      };
     } catch (error: any) {
       this.logger.error(`Error processing CNPJ ${tracked.cnpj}: ${error.message}`);
       throw error;
@@ -115,6 +144,51 @@ export class ScraperProcessor {
         ),
       ),
     );
+  }
+
+  private async collectDiagnostics(
+    page: Page,
+    detectedLinks: string[],
+    filledFieldStrategy?: string,
+    submitStrategy?: string,
+  ) {
+    const bodyText = await page.locator('body').innerText().catch(() => '');
+    const formSnapshot = await page.evaluate(() => {
+      const normalize = (value: string | null | undefined) =>
+        (value ?? '').replace(/\s+/g, ' ').trim();
+
+      const controls = Array.from(
+        document.querySelectorAll('input, select, button, a'),
+      )
+        .slice(0, 40)
+        .map((element) => {
+          const tag = element.tagName.toLowerCase();
+          const attrs = [
+            `tag=${tag}`,
+            `type=${element.getAttribute('type') ?? ''}`,
+            `id=${element.id ?? ''}`,
+            `name=${element.getAttribute('name') ?? ''}`,
+            `value=${normalize(element.getAttribute('value'))}`,
+            `text=${normalize(element.textContent)}`,
+            `title=${normalize(element.getAttribute('title'))}`,
+            `alt=${normalize(element.getAttribute('alt'))}`,
+          ];
+
+          return attrs.join('|');
+        });
+
+      return controls.join(' || ');
+    });
+
+    return {
+      resultPageUrl: page.url(),
+      resultPageTitle: await page.title().catch(() => ''),
+      resultTextSnippet: bodyText.replace(/\s+/g, ' ').trim().slice(0, 1200),
+      detectedLinks: detectedLinks.slice(0, 10),
+      filledFieldStrategy,
+      submitStrategy,
+      formSnapshot,
+    };
   }
 
   private async openMediatorSearchPage(page: Page) {
@@ -222,11 +296,11 @@ export class ScraperProcessor {
     const filledByLabel = await page
       .getByLabel(/CNPJ/i)
       .fill(cnpj)
-      .then(() => true)
-      .catch(() => false);
+      .then(() => 'label')
+      .catch(() => null);
 
     if (filledByLabel) {
-      return;
+      return filledByLabel;
     }
 
     const filledByDom = await page.evaluate((cnpjValue) => {
@@ -262,7 +336,7 @@ export class ScraperProcessor {
         target.value = cnpjValue;
         target.dispatchEvent(new Event('input', { bubbles: true }));
         target.dispatchEvent(new Event('change', { bubbles: true }));
-        return true;
+        return 'dom-label';
       }
 
       const fallback = Array.from(
@@ -288,28 +362,62 @@ export class ScraperProcessor {
       fallback.value = cnpjValue;
       fallback.dispatchEvent(new Event('input', { bubbles: true }));
       fallback.dispatchEvent(new Event('change', { bubbles: true }));
-      return true;
+      return 'dom-attr';
     }, cnpj);
 
     if (!filledByDom) {
-      throw new Error('CNPJ field not found on Mediador page');
+      const filledByPosition = await page.evaluate((cnpjValue) => {
+        const visibleInputs = Array.from(
+          document.querySelectorAll('input[type="text"], input:not([type])'),
+        ).filter((input) => {
+          const element = input as HTMLInputElement;
+          const style = window.getComputedStyle(element);
+          return (
+            style.display !== 'none' &&
+            style.visibility !== 'hidden' &&
+            !element.disabled &&
+            element.type !== 'hidden'
+          );
+        }) as HTMLInputElement[];
+
+        const target = visibleInputs[0];
+        if (!target) {
+          return null;
+        }
+
+        target.focus();
+        target.value = cnpjValue;
+        target.dispatchEvent(new Event('input', { bubbles: true }));
+        target.dispatchEvent(new Event('change', { bubbles: true }));
+        return 'dom-position';
+      }, cnpj);
+
+      if (!filledByPosition) {
+        throw new Error('CNPJ field not found on Mediador page');
+      }
+
+      return filledByPosition;
     }
+
+    return filledByDom;
   }
 
   private async submitSearch(page: Page) {
     const clickedByRole = await page
       .getByRole('button', { name: /Pesquisar/i })
       .click()
-      .then(() => true)
-      .catch(() => false);
+      .then(() => 'role-button')
+      .catch(() => null);
 
     if (clickedByRole) {
-      return;
+      return clickedByRole;
     }
 
     const clickedByDom = await page.evaluate(() => {
       const candidates = Array.from(
-        document.querySelectorAll('input[type="submit"], button, input[type="button"]'),
+        document.querySelectorAll(
+          'input[type="submit"], input[type="button"], input[type="image"], button, a',
+        ),
       );
 
       const target = candidates.find((element) =>
@@ -317,21 +425,78 @@ export class ScraperProcessor {
           (element.textContent ?? '') ||
             element.getAttribute('value') ||
             element.getAttribute('aria-label') ||
+            element.getAttribute('title') ||
+            element.getAttribute('alt') ||
             '',
         ),
-      ) as HTMLButtonElement | HTMLInputElement | undefined;
+      ) as HTMLButtonElement | HTMLInputElement | HTMLAnchorElement | undefined;
 
       if (!target) {
-        return false;
+        return null;
       }
 
       target.click();
-      return true;
+      return `dom-click:${target.tagName.toLowerCase()}:${target.getAttribute('type') ?? ''}`;
     });
 
-    if (!clickedByDom) {
+    if (clickedByDom) {
+      return clickedByDom;
+    }
+
+    const pressedEnter = await page.evaluate(() => {
+      const inputs = Array.from(
+        document.querySelectorAll('input[type="text"], input:not([type])'),
+      ).filter((input) => {
+        const element = input as HTMLInputElement;
+        const style = window.getComputedStyle(element);
+        return (
+          style.display !== 'none' &&
+          style.visibility !== 'hidden' &&
+          !element.disabled &&
+          element.type !== 'hidden'
+        );
+      }) as HTMLInputElement[];
+
+      const target = inputs[0];
+      if (!target) {
+        return null;
+      }
+
+      target.focus();
+      const event = new KeyboardEvent('keydown', {
+        key: 'Enter',
+        code: 'Enter',
+        bubbles: true,
+      });
+      target.dispatchEvent(event);
+      return 'keyboard-enter';
+    });
+
+    if (pressedEnter) {
+      return pressedEnter;
+    }
+
+    const submittedForm = await page.evaluate(() => {
+      const forms = Array.from(document.querySelectorAll('form'));
+      const target = forms.find((form) =>
+        /consultar instrumentos coletivos registrados/i.test(
+          form.textContent ?? '',
+        ),
+      );
+
+      if (!target) {
+        return null;
+      }
+
+      (target as HTMLFormElement).submit();
+      return 'form-submit';
+    });
+
+    if (!submittedForm) {
       throw new Error('Search button not found on Mediador page');
     }
+
+    return submittedForm;
   }
 
   private async parseDetailPage(
