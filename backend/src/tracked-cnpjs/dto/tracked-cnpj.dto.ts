@@ -8,10 +8,6 @@ export class CreateTrackedCnpjDto {
   @IsString()
   @IsOptional()
   name?: string;
-
-  @IsString()
-  @IsNotEmpty()
-  organizationId: string;
 }
 
 export class UpdateTrackedCnpjDto {

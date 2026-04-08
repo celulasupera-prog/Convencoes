@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Body, Param, Put, Delete, UseGuards, Query } from '@nestjs/common';
+import { Controller, Get, Post, Body, Param, Put, Delete, UseGuards, Query, Request } from '@nestjs/common';
 import { TrackedCnpjsService } from './tracked-cnpjs.service';
 import { CreateTrackedCnpjDto, UpdateTrackedCnpjDto } from './dto/tracked-cnpj.dto';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
@@ -9,13 +9,13 @@ export class TrackedCnpjsController {
   constructor(private readonly trackedCnpjsService: TrackedCnpjsService) {}
 
   @Post()
-  create(@Body() createDto: CreateTrackedCnpjDto) {
-    return this.trackedCnpjsService.create(createDto);
+  create(@Body() createDto: CreateTrackedCnpjDto, @Request() req: any) {
+    return this.trackedCnpjsService.create(createDto, req.user.id);
   }
 
   @Get()
-  findAll(@Query('organizationId') organizationId?: string) {
-    return this.trackedCnpjsService.findAll(organizationId);
+  findAll(@Query('organizationId') organizationId: string | undefined, @Request() req: any) {
+    return this.trackedCnpjsService.findAll(req.user.id, organizationId);
   }
 
   @Get(':id')

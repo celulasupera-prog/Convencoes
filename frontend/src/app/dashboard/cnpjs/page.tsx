@@ -64,7 +64,6 @@ export default function TrackedCnpjsPage() {
       await api.post('/tracked-cnpjs', {
         cnpj: newCnpj.cnpj.replace(/\D/g, ''),
         name: newCnpj.name || undefined,
-        organizationId: 'default', // will be replaced once org selection is added
       })
       toast.success('CNPJ adicionado com sucesso!')
       setDialogOpen(false)

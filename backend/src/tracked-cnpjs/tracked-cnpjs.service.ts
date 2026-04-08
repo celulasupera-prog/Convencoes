@@ -6,7 +6,33 @@ import { CreateTrackedCnpjDto, UpdateTrackedCnpjDto } from './dto/tracked-cnpj.d
 export class TrackedCnpjsService {
   constructor(private prisma: PrismaService) {}
 
-  async create(dto: CreateTrackedCnpjDto) {
+  private async ensureUserOrganization(userId: string) {
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: { id: true, email: true, organizationId: true },
+    });
+
+    if (!user) {
+      throw new NotFoundException('User not found');
+    }
+
+    if (user.organizationId) {
+      return user.organizationId;
+    }
+
+    const organization = await this.prisma.organization.create({
+      data: {
+        name: user.email ? `Organizacao de ${user.email}` : 'Organizacao Padrao',
+        users: {
+          connect: { id: user.id },
+        },
+      },
+    });
+
+    return organization.id;
+  }
+
+  async create(dto: CreateTrackedCnpjDto, userId: string) {
     const existing = await this.prisma.trackedCnpj.findUnique({
       where: { cnpj: dto.cnpj },
     });
@@ -14,18 +40,24 @@ export class TrackedCnpjsService {
       throw new ConflictException('CNPJ is already tracked');
     }
 
+    const organizationId = await this.ensureUserOrganization(userId);
+
     return this.prisma.trackedCnpj.create({
       data: {
         cnpj: dto.cnpj,
         name: dto.name,
-        organizationId: dto.organizationId,
+        organizationId,
       },
     });
   }
 
-  async findAll(organizationId?: string) {
+  async findAll(userId: string, organizationId?: string) {
+    const userOrganizationId = await this.ensureUserOrganization(userId);
+
     return this.prisma.trackedCnpj.findMany({
-      where: organizationId ? { organizationId } : undefined,
+      where: {
+        organizationId: organizationId ?? userOrganizationId,
+      },
     });
   }
 
