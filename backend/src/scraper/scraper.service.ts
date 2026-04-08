@@ -110,6 +110,7 @@ export class ScraperService {
           `organization:${organizationId}`,
           `triggeredBy:${triggeredBy}`,
           `queued:${activeCnpjs.length}`,
+          'status:run-started',
         ].join('\n'),
       },
     });
@@ -135,9 +136,12 @@ export class ScraperService {
     try {
       for (const tracked of cnpjs) {
         logLines.push(`processing:${tracked.cnpj}`);
+        await this.persistRunLog(runId, logLines);
 
         const items = await this.scraperProcessor.scrapeTrackedCnpj(tracked);
         totalItems += items.length;
+        logLines.push(`result-links:${tracked.cnpj}:items=${items.length}`);
+        await this.persistRunLog(runId, logLines);
 
         for (const item of items) {
           const existing = await this.prisma.instrument.findUnique({
@@ -178,10 +182,16 @@ export class ScraperService {
 
           if (!existing) {
             newItems += 1;
+            logLines.push(`saved:new:${item.externalId}`);
+          } else {
+            logLines.push(`saved:update:${item.externalId}`);
           }
+
+          await this.persistRunLog(runId, logLines);
         }
 
         logLines.push(`processed:${tracked.cnpj}:items=${items.length}`);
+        await this.persistRunLog(runId, logLines);
       }
 
       logLines.push(`completed:new=${newItems}:total=${totalItems}`);
@@ -208,5 +218,14 @@ export class ScraperService {
 
       this.logger.error(`Run ${runId} failed: ${error.message}`);
     }
+  }
+
+  private async persistRunLog(runId: string, logLines: string[]) {
+    await this.prisma.searchRun.update({
+      where: { id: runId },
+      data: {
+        logs: logLines.join('\n'),
+      },
+    });
   }
 }

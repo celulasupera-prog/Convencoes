@@ -126,7 +126,8 @@ export default function TrackedCnpjsPage() {
   const formatDate = (d: string) => new Date(d).toLocaleString('pt-BR')
   const latestRun = runs[0]
   const hasRunning = runs.some((run) => run.status === 'RUNNING')
-  const latestLogLine = latestRun?.logs?.split('\n').filter(Boolean).at(-1)
+  const latestLogs = latestRun?.logs?.split('\n').filter(Boolean) ?? []
+  const latestLogLine = latestLogs.at(-1)
 
   return (
     <div className="space-y-6">
@@ -158,31 +159,63 @@ export default function TrackedCnpjsPage() {
         <CardHeader className="pb-3">
           <CardTitle className="text-lg font-heading">Status da Varredura</CardTitle>
         </CardHeader>
-        <CardContent className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
-          <div className="space-y-1">
-            <div className="flex items-center gap-2">
-              <Badge variant={latestRun?.status === 'FAILED' ? 'destructive' : latestRun?.status === 'SUCCESS' ? 'default' : 'secondary'}>
-                {latestRun?.status === 'RUNNING'
-                  ? 'Em execucao'
-                  : latestRun?.status === 'SUCCESS'
-                    ? 'Concluida'
-                    : latestRun?.status === 'FAILED'
-                      ? 'Falhou'
-                      : 'Sem execucao'}
-              </Badge>
-              {latestRun?.startedAt && (
-                <span className="text-sm text-muted-foreground">
-                  Inicio: {formatDate(latestRun.startedAt)}
-                </span>
-              )}
+        <CardContent className="space-y-4">
+          <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+            <div className="space-y-1">
+              <div className="flex items-center gap-2">
+                <Badge variant={latestRun?.status === 'FAILED' ? 'destructive' : latestRun?.status === 'SUCCESS' ? 'default' : 'secondary'}>
+                  {latestRun?.status === 'RUNNING'
+                    ? 'Em execucao'
+                    : latestRun?.status === 'SUCCESS'
+                      ? 'Concluida'
+                      : latestRun?.status === 'FAILED'
+                        ? 'Falhou'
+                        : 'Sem execucao'}
+                </Badge>
+                {latestRun?.startedAt && (
+                  <span className="text-sm text-muted-foreground">
+                    Inicio: {formatDate(latestRun.startedAt)}
+                  </span>
+                )}
+                {latestRun?.finishedAt && latestRun.status !== 'RUNNING' && (
+                  <span className="text-sm text-muted-foreground">
+                    Fim: {formatDate(latestRun.finishedAt)}
+                  </span>
+                )}
+              </div>
+              <p className="text-sm text-muted-foreground">
+                {latestLogLine || 'Nenhuma varredura executada ainda.'}
+              </p>
             </div>
-            <p className="text-sm text-muted-foreground">
-              {latestLogLine || 'Nenhuma varredura executada ainda.'}
-            </p>
+            <Button variant="ghost" onClick={() => { fetchRuns(); fetchCnpjs() }}>
+              <RefreshCw className="w-4 h-4 mr-2" /> Atualizar status
+            </Button>
           </div>
-          <Button variant="ghost" onClick={fetchRuns}>
-            <RefreshCw className="w-4 h-4 mr-2" /> Atualizar status
-          </Button>
+          <div className="rounded-lg border bg-background/60 p-3">
+            <p className="mb-2 text-sm font-medium">Log da ultima execucao</p>
+            {latestLogs.length > 0 ? (
+              <pre className="max-h-64 overflow-auto whitespace-pre-wrap break-words text-xs text-muted-foreground">
+                {latestLogs.join('\n')}
+              </pre>
+            ) : (
+              <p className="text-sm text-muted-foreground">Sem logs ainda.</p>
+            )}
+          </div>
+          {runs.length > 1 && (
+            <div className="rounded-lg border bg-background/60 p-3">
+              <p className="mb-2 text-sm font-medium">Historico recente</p>
+              <div className="space-y-2">
+                {runs.slice(0, 5).map((run) => (
+                  <div key={run.id} className="flex items-center justify-between gap-3 text-sm">
+                    <span className="truncate text-muted-foreground">{formatDate(run.startedAt)}</span>
+                    <Badge variant={run.status === 'FAILED' ? 'destructive' : run.status === 'SUCCESS' ? 'default' : 'secondary'}>
+                      {run.status}
+                    </Badge>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
         </CardContent>
       </Card>
 
