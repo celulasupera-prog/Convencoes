@@ -62,6 +62,35 @@ export class ScraperService {
     });
   }
 
+  async runLocalSweep() {
+    const organizations = await this.prisma.trackedCnpj.findMany({
+      where: { isActive: true },
+      select: { organizationId: true },
+      distinct: ['organizationId'],
+    });
+
+    if (organizations.length === 0) {
+      throw new NotFoundException('Nenhum CNPJ ativo para monitorar');
+    }
+
+    const results: Array<{ organizationId: string; runId: string }> = [];
+
+    for (const item of organizations) {
+      const run = await this.startRunForOrganization(
+        item.organizationId,
+        'local-cli',
+        true,
+      );
+
+      results.push({
+        organizationId: item.organizationId,
+        runId: run.id,
+      });
+    }
+
+    return results;
+  }
+
   async findRun(id: string) {
     const run = await this.prisma.searchRun.findUnique({
       where: { id },
@@ -77,6 +106,7 @@ export class ScraperService {
   private async startRunForOrganization(
     organizationId: string,
     triggeredBy: string,
+    waitForCompletion = false,
   ) {
     const running = await this.prisma.searchRun.findFirst({
       where: {
@@ -115,7 +145,11 @@ export class ScraperService {
       },
     });
 
-    void this.executeRun(run.id, organizationId);
+    if (waitForCompletion) {
+      await this.executeRun(run.id, organizationId);
+    } else {
+      void this.executeRun(run.id, organizationId);
+    }
 
     return run;
   }
