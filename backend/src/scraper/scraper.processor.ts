@@ -21,20 +21,31 @@ type ParsedInstrument = {
 @Injectable()
 export class ScraperProcessor {
   private readonly logger = new Logger(ScraperProcessor.name);
+  private readonly mediatorUrls = [
+    'https://www3.mte.gov.br/sistemas/mediador/consultarinstcoletivo',
+    'http://www3.mte.gov.br/sistemas/mediador/ConsultarInstColetivo',
+  ];
 
   async scrapeTrackedCnpj(tracked: TrackedCnpj): Promise<ParsedInstrument[]> {
     let browser: Browser | null = null;
 
     try {
       this.logger.log(`Processing CNPJ ${tracked.cnpj}`);
-      browser = await chromium.launch({ headless: true });
-      const context = await browser.newContext();
+      browser = await chromium.launch({
+        headless: true,
+        args: ['--disable-dev-shm-usage', '--no-sandbox'],
+      });
+      const context = await browser.newContext({
+        locale: 'pt-BR',
+        userAgent:
+          'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36',
+      });
       const page = await context.newPage();
+      page.setDefaultNavigationTimeout(120000);
+      page.setDefaultTimeout(120000);
 
-      await page.goto(
-        'https://www3.mte.gov.br/sistemas/mediador/consultarinstcoletivo',
-        { waitUntil: 'domcontentloaded', timeout: 60000 },
-      );
+      const usedUrl = await this.openMediatorSearchPage(page);
+      this.logger.log(`Mediator loaded from ${usedUrl}`);
 
       await page.waitForSelector('#nrCNPJ', { timeout: 30000 });
       await page.fill('#nrCNPJ', tracked.cnpj.replace(/\D/g, ''));
@@ -105,6 +116,24 @@ export class ScraperProcessor {
         ),
       ),
     );
+  }
+
+  private async openMediatorSearchPage(page: Page) {
+    const errors: string[] = [];
+
+    for (const url of this.mediatorUrls) {
+      try {
+        await page.goto(url, {
+          waitUntil: 'domcontentloaded',
+          timeout: 120000,
+        });
+        return url;
+      } catch (error: any) {
+        errors.push(`${url} => ${error.message}`);
+      }
+    }
+
+    throw new Error(`Unable to open Mediador: ${errors.join(' | ')}`);
   }
 
   private async selectAllValidity(page: Page) {
