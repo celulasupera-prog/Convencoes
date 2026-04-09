@@ -163,12 +163,22 @@ export class ScraperProcessor {
         .slice(0, 40)
         .map((element) => {
           const tag = element.tagName.toLowerCase();
+          const inputValue =
+            element instanceof HTMLInputElement ||
+            element instanceof HTMLSelectElement ||
+            element instanceof HTMLTextAreaElement
+              ? normalize(element.value)
+              : '';
+          const checked =
+            element instanceof HTMLInputElement ? String(element.checked) : '';
           const attrs = [
             `tag=${tag}`,
             `type=${element.getAttribute('type') ?? ''}`,
             `id=${element.id ?? ''}`,
             `name=${element.getAttribute('name') ?? ''}`,
             `value=${normalize(element.getAttribute('value'))}`,
+            `liveValue=${inputValue}`,
+            `checked=${checked}`,
             `text=${normalize(element.textContent)}`,
             `title=${normalize(element.getAttribute('title'))}`,
             `alt=${normalize(element.getAttribute('alt'))}`,
@@ -210,6 +220,44 @@ export class ScraperProcessor {
   }
 
   private async selectAllValidity(page: Page) {
+    const knownSelect = page.locator('#cboSTVigencia');
+    if ((await knownSelect.count()) > 0) {
+      await knownSelect.selectOption({ label: 'Todos' }).catch(() => null);
+      const selectedValue = await knownSelect.inputValue().catch(() => '');
+      if (selectedValue) {
+        return;
+      }
+    }
+
+    const selectedByKnownId = await page.evaluate(() => {
+      const select = document.getElementById('cboSTVigencia');
+      if (!(select instanceof HTMLSelectElement)) {
+        return false;
+      }
+
+      const option = Array.from(select.options).find(
+        (item) =>
+          (item.textContent ?? '')
+            .normalize('NFD')
+            .replace(/\p{Diacritic}/gu, '')
+            .toLowerCase()
+            .trim() === 'todos',
+      );
+
+      if (!option) {
+        return false;
+      }
+
+      select.value = option.value;
+      select.dispatchEvent(new Event('input', { bubbles: true }));
+      select.dispatchEvent(new Event('change', { bubbles: true }));
+      return true;
+    });
+
+    if (selectedByKnownId) {
+      return;
+    }
+
     const selected = await page.evaluate(() => {
       const normalize = (value: string | null | undefined) =>
         (value ?? '')
@@ -293,6 +341,43 @@ export class ScraperProcessor {
   }
 
   private async fillCnpjField(page: Page, cnpj: string) {
+    const knownCheckbox = page.locator('#chkNRCNPJ');
+    const knownInput = page.locator('#txtNRCNPJ');
+    if ((await knownCheckbox.count()) > 0 && (await knownInput.count()) > 0) {
+      await knownCheckbox.check().catch(async () => {
+        await knownCheckbox.click();
+      });
+      await knownInput.fill(cnpj);
+      const currentValue = await knownInput.inputValue().catch(() => '');
+      if (currentValue.replace(/\D/g, '') === cnpj) {
+        return 'known-id-playwright';
+      }
+    }
+
+    const filledByKnownId = await page.evaluate((cnpjValue) => {
+      const checkbox = document.getElementById('chkNRCNPJ');
+      const input = document.getElementById('txtNRCNPJ');
+
+      if (!(checkbox instanceof HTMLInputElement) || !(input instanceof HTMLInputElement)) {
+        return null;
+      }
+
+      checkbox.checked = true;
+      checkbox.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      checkbox.dispatchEvent(new Event('input', { bubbles: true }));
+      checkbox.dispatchEvent(new Event('change', { bubbles: true }));
+
+      input.focus();
+      input.value = cnpjValue;
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+      input.dispatchEvent(new Event('change', { bubbles: true }));
+      return 'known-id';
+    }, cnpj);
+
+    if (filledByKnownId) {
+      return filledByKnownId;
+    }
+
     const filledByLabel = await page
       .getByLabel(/CNPJ/i)
       .fill(cnpj)
@@ -403,6 +488,46 @@ export class ScraperProcessor {
   }
 
   private async submitSearch(page: Page) {
+    const knownButton = page.locator('#btnPesquisar, input[name="btnPesquisar"]');
+    if ((await knownButton.count()) > 0) {
+      await knownButton.first().click();
+      return 'known-control-playwright';
+    }
+
+    const submittedByKnownId = await page.evaluate(() => {
+      const directSelectors = [
+        '#btnPesquisar',
+        'input[name="btnPesquisar"]',
+        'input[id*="Pesquisar"]',
+        'input[value*="Pesquisar"]',
+        'input[type="image"][alt*="Pesquisar"]',
+        'input[type="image"][title*="Pesquisar"]',
+      ];
+
+      for (const selector of directSelectors) {
+        const element = document.querySelector(selector);
+        if (!(element instanceof HTMLElement)) {
+          continue;
+        }
+
+        element.click();
+        return `known-control:${selector}`;
+      }
+
+      const input = document.getElementById('txtNRCNPJ');
+      const form = input?.closest('form');
+      if (form instanceof HTMLFormElement) {
+        form.submit();
+        return 'known-form-submit';
+      }
+
+      return null;
+    });
+
+    if (submittedByKnownId) {
+      return submittedByKnownId;
+    }
+
     const clickedByRole = await page
       .getByRole('button', { name: /Pesquisar/i })
       .click()
