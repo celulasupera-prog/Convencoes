@@ -12,7 +12,7 @@ import {
   DialogTitle,
   DialogDescription,
 } from '@/components/ui/dialog'
-import { Plus, Briefcase, Activity, Loader2, Play, RefreshCw } from 'lucide-react'
+import { Plus, Briefcase, Activity, Loader2, Play, RefreshCw, Trash2 } from 'lucide-react'
 import api from '@/lib/api'
 import { toast } from 'sonner'
 
@@ -55,8 +55,6 @@ function parseRunLogs(logs: string[]) {
   }
 
   return {
-    failedMessage,
-    ajaxStatus,
     ajaxAttempts,
     debugPath,
     isPortalFailure,
@@ -71,7 +69,9 @@ export default function TrackedCnpjsPage() {
   const [dialogOpen, setDialogOpen] = useState(false)
   const [saving, setSaving] = useState(false)
   const [triggeringRun, setTriggeringRun] = useState(false)
-  const [newCnpj, setNewCnpj] = useState({ cnpj: '', name: '' })
+  const [editingItem, setEditingItem] = useState<TrackedCnpj | null>(null)
+  const [busyId, setBusyId] = useState<string | null>(null)
+  const [formState, setFormState] = useState({ cnpj: '', name: '' })
 
   async function fetchCnpjs() {
     setLoading(true)
@@ -111,6 +111,24 @@ export default function TrackedCnpjsPage() {
     return () => window.clearInterval(interval)
   }, [runs])
 
+  function resetDialog() {
+    setDialogOpen(false)
+    setEditingItem(null)
+    setFormState({ cnpj: '', name: '' })
+  }
+
+  function openCreateDialog() {
+    setEditingItem(null)
+    setFormState({ cnpj: '', name: '' })
+    setDialogOpen(true)
+  }
+
+  function handleEdit(item: TrackedCnpj) {
+    setEditingItem(item)
+    setFormState({ cnpj: item.cnpj, name: item.name ?? '' })
+    setDialogOpen(true)
+  }
+
   async function handleToggle(item: TrackedCnpj) {
     try {
       await api.put(`/tracked-cnpjs/${item.id}`, { isActive: !item.isActive })
@@ -121,24 +139,46 @@ export default function TrackedCnpjsPage() {
     }
   }
 
-  async function handleAdd(e: React.FormEvent) {
+  async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
     setSaving(true)
+
     try {
-      // For now, we need an organizationId — if the user has one in JWT we'd use it.
-      // Using a placeholder until multi-org is wired in the UI.
-      await api.post('/tracked-cnpjs', {
-        cnpj: newCnpj.cnpj.replace(/\D/g, ''),
-        name: newCnpj.name || undefined,
-      })
-      toast.success('CNPJ adicionado com sucesso!')
-      setDialogOpen(false)
-      setNewCnpj({ cnpj: '', name: '' })
+      const payload = {
+        cnpj: formState.cnpj.replace(/\D/g, ''),
+        name: formState.name || undefined,
+      }
+
+      if (editingItem) {
+        await api.put(`/tracked-cnpjs/${editingItem.id}`, payload)
+        toast.success('CNPJ atualizado com sucesso!')
+      } else {
+        await api.post('/tracked-cnpjs', payload)
+        toast.success('CNPJ adicionado com sucesso!')
+      }
+
+      resetDialog()
       fetchCnpjs()
     } catch {
-      toast.error('Erro ao adicionar CNPJ')
+      toast.error(editingItem ? 'Erro ao atualizar CNPJ' : 'Erro ao adicionar CNPJ')
     } finally {
       setSaving(false)
+    }
+  }
+
+  async function handleDelete(item: TrackedCnpj) {
+    const confirmed = window.confirm(`Deseja excluir o CNPJ ${item.cnpj}?`)
+    if (!confirmed) return
+
+    setBusyId(item.id)
+    try {
+      await api.delete(`/tracked-cnpjs/${item.id}`)
+      toast.success('CNPJ excluido com sucesso')
+      fetchCnpjs()
+    } catch {
+      toast.error('Erro ao excluir CNPJ')
+    } finally {
+      setBusyId(null)
     }
   }
 
@@ -181,7 +221,7 @@ export default function TrackedCnpjsPage() {
               <><Play className="w-4 h-4 mr-2" /> Executar varredura</>
             )}
           </Button>
-          <Button className="font-semibold" onClick={() => setDialogOpen(true)}>
+          <Button className="font-semibold" onClick={openCreateDialog}>
             <Plus className="w-4 h-4 mr-2" /> Adicionar CNPJ
           </Button>
         </div>
@@ -215,9 +255,7 @@ export default function TrackedCnpjsPage() {
                   </span>
                 )}
               </div>
-              <p className="text-sm text-muted-foreground">
-                {latestRunInfo.summary}
-              </p>
+              <p className="text-sm text-muted-foreground">{latestRunInfo.summary}</p>
             </div>
             <Button variant="ghost" onClick={() => { fetchRuns(); fetchCnpjs() }}>
               <RefreshCw className="w-4 h-4 mr-2" /> Atualizar status
@@ -275,7 +313,7 @@ export default function TrackedCnpjsPage() {
           <Briefcase className="w-12 h-12 opacity-30" />
           <p className="text-lg font-medium">Nenhum CNPJ cadastrado</p>
           <p className="text-sm">Adicione um CNPJ para iniciar o monitoramento.</p>
-          <Button onClick={() => setDialogOpen(true)}>
+          <Button onClick={openCreateDialog}>
             <Plus className="w-4 h-4 mr-2" /> Adicionar CNPJ
           </Button>
         </div>
@@ -304,7 +342,9 @@ export default function TrackedCnpjsPage() {
                   Atualizado: <span className="font-medium text-foreground">{formatDate(item.updatedAt)}</span>
                 </div>
                 <div className="flex gap-2">
-                  <Button variant="outline" className="flex-1" disabled>Editar</Button>
+                  <Button variant="outline" className="flex-1" onClick={() => handleEdit(item)}>
+                    Editar
+                  </Button>
                   <Button
                     variant={item.isActive ? 'secondary' : 'default'}
                     className="flex-1"
@@ -313,28 +353,46 @@ export default function TrackedCnpjsPage() {
                     {item.isActive ? 'Pausar' : 'Retomar'}
                   </Button>
                 </div>
+                <Button
+                  variant="ghost"
+                  className="mt-2 w-full text-destructive hover:text-destructive"
+                  onClick={() => handleDelete(item)}
+                  disabled={busyId === item.id}
+                >
+                  {busyId === item.id ? (
+                    <><Loader2 className="w-4 h-4 mr-2 animate-spin" /> Excluindo...</>
+                  ) : (
+                    <><Trash2 className="w-4 h-4 mr-2" /> Excluir</>
+                  )}
+                </Button>
               </CardContent>
             </Card>
           ))}
         </div>
       )}
 
-      {/* Add CNPJ Dialog */}
-      <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
+      <Dialog open={dialogOpen} onOpenChange={(open) => {
+        if (!open) resetDialog()
+        else setDialogOpen(true)
+      }}>
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
-            <DialogTitle className="font-heading text-xl">Adicionar CNPJ</DialogTitle>
+            <DialogTitle className="font-heading text-xl">
+              {editingItem ? 'Editar CNPJ' : 'Adicionar CNPJ'}
+            </DialogTitle>
             <DialogDescription>
-              Insira o CNPJ da empresa para iniciar o monitoramento automático.
+              {editingItem
+                ? 'Atualize os dados da empresa monitorada.'
+                : 'Insira o CNPJ da empresa para iniciar o monitoramento automatico.'}
             </DialogDescription>
           </DialogHeader>
-          <form onSubmit={handleAdd} className="space-y-4 pt-2">
+          <form onSubmit={handleSubmit} className="space-y-4 pt-2">
             <div className="space-y-2">
               <label className="text-sm font-medium">CNPJ <span className="text-destructive">*</span></label>
               <Input
                 placeholder="00.000.000/0000-00"
-                value={newCnpj.cnpj}
-                onChange={(e) => setNewCnpj({ ...newCnpj, cnpj: e.target.value })}
+                value={formState.cnpj}
+                onChange={(e) => setFormState({ ...formState, cnpj: e.target.value })}
                 className="font-mono"
                 required
               />
@@ -343,16 +401,16 @@ export default function TrackedCnpjsPage() {
               <label className="text-sm font-medium">Nome da Empresa <span className="text-muted-foreground text-xs">(opcional)</span></label>
               <Input
                 placeholder="Ex: Empresa XPTO S.A."
-                value={newCnpj.name}
-                onChange={(e) => setNewCnpj({ ...newCnpj, name: e.target.value })}
+                value={formState.name}
+                onChange={(e) => setFormState({ ...formState, name: e.target.value })}
               />
             </div>
             <div className="flex gap-2 pt-2">
-              <Button type="button" variant="outline" className="flex-1" onClick={() => setDialogOpen(false)}>
+              <Button type="button" variant="outline" className="flex-1" onClick={resetDialog}>
                 Cancelar
               </Button>
               <Button type="submit" className="flex-1" disabled={saving}>
-                {saving ? <><Loader2 className="w-4 h-4 mr-2 animate-spin" /> Salvando...</> : 'Adicionar'}
+                {saving ? <><Loader2 className="w-4 h-4 mr-2 animate-spin" /> Salvando...</> : editingItem ? 'Salvar' : 'Adicionar'}
               </Button>
             </div>
           </form>
