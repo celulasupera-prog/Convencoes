@@ -6,7 +6,7 @@ import {
 } from '@nestjs/common';
 import { Cron, CronExpression } from '@nestjs/schedule';
 import { PrismaService } from '../prisma/prisma.service';
-import { ScraperProcessor } from './scraper.processor';
+import { MediadorSearchError, ScraperProcessor } from './scraper.processor';
 
 @Injectable()
 export class ScraperService {
@@ -203,6 +203,31 @@ export class ScraperService {
         if (scrapeResult.diagnostics.formSnapshot) {
           logLines.push(`form-snapshot:${scrapeResult.diagnostics.formSnapshot}`);
         }
+        if (scrapeResult.diagnostics.ajaxResponseUrl) {
+          logLines.push(
+            `ajax-response-url:${scrapeResult.diagnostics.ajaxResponseUrl}`,
+          );
+        }
+        if (typeof scrapeResult.diagnostics.ajaxResponseStatus === 'number') {
+          logLines.push(
+            `ajax-response-status:${scrapeResult.diagnostics.ajaxResponseStatus}`,
+          );
+        }
+        if (typeof scrapeResult.diagnostics.ajaxAttemptCount === 'number') {
+          logLines.push(
+            `ajax-attempt-count:${scrapeResult.diagnostics.ajaxAttemptCount}`,
+          );
+        }
+        if (scrapeResult.diagnostics.ajaxResponseSnippet) {
+          logLines.push(
+            `ajax-response-snippet:${scrapeResult.diagnostics.ajaxResponseSnippet}`,
+          );
+        }
+        if (scrapeResult.diagnostics.debugArtifactBasePath) {
+          logLines.push(
+            `debug-artifact-base-path:${scrapeResult.diagnostics.debugArtifactBasePath}`,
+          );
+        }
         await this.persistRunLog(runId, logLines);
 
         for (const item of items) {
@@ -267,6 +292,31 @@ export class ScraperService {
         },
       });
     } catch (error: any) {
+      if (error instanceof MediadorSearchError) {
+        if (error.diagnostics.ajaxResponseUrl) {
+          logLines.push(`ajax-response-url:${error.diagnostics.ajaxResponseUrl}`);
+        }
+        if (typeof error.diagnostics.ajaxResponseStatus === 'number') {
+          logLines.push(
+            `ajax-response-status:${error.diagnostics.ajaxResponseStatus}`,
+          );
+        }
+        if (typeof error.diagnostics.ajaxAttemptCount === 'number') {
+          logLines.push(
+            `ajax-attempt-count:${error.diagnostics.ajaxAttemptCount}`,
+          );
+        }
+        if (error.diagnostics.ajaxResponseSnippet) {
+          logLines.push(
+            `ajax-response-snippet:${error.diagnostics.ajaxResponseSnippet}`,
+          );
+        }
+        if (error.diagnostics.debugArtifactBasePath) {
+          logLines.push(
+            `debug-artifact-base-path:${error.diagnostics.debugArtifactBasePath}`,
+          );
+        }
+      }
       logLines.push(`failed:${error.message}`);
 
       await this.prisma.searchRun.update({

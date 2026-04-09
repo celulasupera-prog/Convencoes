@@ -32,6 +32,38 @@ interface SearchRun {
   logs?: string | null
 }
 
+function parseRunLogs(logs: string[]) {
+  const findValue = (prefix: string) =>
+    logs.find((line) => line.startsWith(prefix))?.slice(prefix.length)
+
+  const failedMessage = findValue('failed:')
+  const ajaxStatus = findValue('ajax-response-status:')
+  const ajaxAttempts = findValue('ajax-attempt-count:')
+  const debugPath = findValue('debug-artifact-base-path:')
+  const completed = findValue('completed:')
+
+  const isPortalFailure =
+    failedMessage?.includes('Falha no portal do MTE') ||
+    ajaxStatus === '500'
+
+  let summary =
+    failedMessage ||
+    (completed ? `Varredura concluida: ${completed}` : 'Nenhuma varredura executada ainda.')
+
+  if (isPortalFailure) {
+    summary = `Portal do MTE indisponivel no momento${ajaxAttempts ? ` apos ${ajaxAttempts} tentativa(s)` : ''}.`
+  }
+
+  return {
+    failedMessage,
+    ajaxStatus,
+    ajaxAttempts,
+    debugPath,
+    isPortalFailure,
+    summary,
+  }
+}
+
 export default function TrackedCnpjsPage() {
   const [cnpjs, setCnpjs] = useState<TrackedCnpj[]>([])
   const [runs, setRuns] = useState<SearchRun[]>([])
@@ -127,7 +159,7 @@ export default function TrackedCnpjsPage() {
   const latestRun = runs[0]
   const hasRunning = runs.some((run) => run.status === 'RUNNING')
   const latestLogs = latestRun?.logs?.split('\n').filter(Boolean) ?? []
-  const latestLogLine = latestLogs.at(-1)
+  const latestRunInfo = parseRunLogs(latestLogs)
 
   return (
     <div className="space-y-6">
@@ -184,13 +216,28 @@ export default function TrackedCnpjsPage() {
                 )}
               </div>
               <p className="text-sm text-muted-foreground">
-                {latestLogLine || 'Nenhuma varredura executada ainda.'}
+                {latestRunInfo.summary}
               </p>
             </div>
             <Button variant="ghost" onClick={() => { fetchRuns(); fetchCnpjs() }}>
               <RefreshCw className="w-4 h-4 mr-2" /> Atualizar status
             </Button>
           </div>
+          {latestRunInfo.isPortalFailure && (
+            <div className="rounded-lg border border-destructive/30 bg-destructive/5 p-3 text-sm">
+              <p className="font-medium text-destructive">Falha externa no portal do MTE</p>
+              <p className="mt-1 text-muted-foreground">
+                A consulta foi enviada corretamente, mas o portal do MTE respondeu com erro interno
+                {latestRunInfo.ajaxAttempts ? ` apos ${latestRunInfo.ajaxAttempts} tentativa(s)` : ''}.
+                Tente novamente mais tarde.
+              </p>
+              {latestRunInfo.debugPath && (
+                <p className="mt-2 font-mono text-xs text-muted-foreground break-all">
+                  Debug local: {latestRunInfo.debugPath}
+                </p>
+              )}
+            </div>
+          )}
           <div className="rounded-lg border bg-background/60 p-3">
             <p className="mb-2 text-sm font-medium">Log da ultima execucao</p>
             {latestLogs.length > 0 ? (
