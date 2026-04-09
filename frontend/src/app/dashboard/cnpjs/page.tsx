@@ -71,7 +71,10 @@ export default function TrackedCnpjsPage() {
   const [triggeringRun, setTriggeringRun] = useState(false)
   const [editingItem, setEditingItem] = useState<TrackedCnpj | null>(null)
   const [busyId, setBusyId] = useState<string | null>(null)
+  const [showFullLogs, setShowFullLogs] = useState(false)
+  const [batchMode, setBatchMode] = useState(false)
   const [formState, setFormState] = useState({ cnpj: '', name: '' })
+  const [batchInput, setBatchInput] = useState('')
 
   async function fetchCnpjs() {
     setLoading(true)
@@ -115,6 +118,8 @@ export default function TrackedCnpjsPage() {
     setDialogOpen(false)
     setEditingItem(null)
     setFormState({ cnpj: '', name: '' })
+    setBatchMode(false)
+    setBatchInput('')
   }
 
   function openCreateDialog() {
@@ -144,6 +149,46 @@ export default function TrackedCnpjsPage() {
     setSaving(true)
 
     try {
+      if (batchMode && !editingItem) {
+        const rows = batchInput
+          .split('\n')
+          .map((line) => line.trim())
+          .filter(Boolean)
+
+        const parsedItems = rows
+          .map((line) => {
+            const [cnpjPart, ...nameParts] = line.split(/[;,|-]/)
+            return {
+              cnpj: cnpjPart.replace(/\D/g, ''),
+              name: nameParts.join(' ').trim() || undefined,
+            }
+          })
+          .filter((item) => item.cnpj.length === 14)
+
+        if (parsedItems.length === 0) {
+          toast.error('Nenhum CNPJ valido encontrado na lista')
+          return
+        }
+
+        const results = await Promise.allSettled(
+          parsedItems.map((item) => api.post('/tracked-cnpjs', item)),
+        )
+
+        const successCount = results.filter((result) => result.status === 'fulfilled').length
+        const failedCount = results.length - successCount
+
+        if (successCount > 0) {
+          toast.success(`${successCount} CNPJ(s) adicionados com sucesso`)
+        }
+        if (failedCount > 0) {
+          toast.error(`${failedCount} CNPJ(s) nao puderam ser adicionados`)
+        }
+
+        resetDialog()
+        fetchCnpjs()
+        return
+      }
+
       const payload = {
         cnpj: formState.cnpj.replace(/\D/g, ''),
         name: formState.name || undefined,
@@ -200,6 +245,7 @@ export default function TrackedCnpjsPage() {
   const hasRunning = runs.some((run) => run.status === 'RUNNING')
   const latestLogs = latestRun?.logs?.split('\n').filter(Boolean) ?? []
   const latestRunInfo = parseRunLogs(latestLogs)
+  const displayedLogs = showFullLogs ? latestLogs : latestLogs.slice(0, 8)
 
   return (
     <div className="space-y-6">
@@ -277,10 +323,17 @@ export default function TrackedCnpjsPage() {
             </div>
           )}
           <div className="rounded-lg border bg-background/60 p-3">
-            <p className="mb-2 text-sm font-medium">Log da ultima execucao</p>
+            <div className="mb-2 flex items-center justify-between gap-2">
+              <p className="text-sm font-medium">Log da ultima execucao</p>
+              {latestLogs.length > 8 && (
+                <Button variant="ghost" size="sm" onClick={() => setShowFullLogs((current) => !current)}>
+                  {showFullLogs ? 'Mostrar menos' : 'Mostrar mais'}
+                </Button>
+              )}
+            </div>
             {latestLogs.length > 0 ? (
               <pre className="max-h-64 overflow-auto whitespace-pre-wrap break-words text-xs text-muted-foreground">
-                {latestLogs.join('\n')}
+                {displayedLogs.join('\n')}
               </pre>
             ) : (
               <p className="text-sm text-muted-foreground">Sem logs ainda.</p>
@@ -387,6 +440,41 @@ export default function TrackedCnpjsPage() {
             </DialogDescription>
           </DialogHeader>
           <form onSubmit={handleSubmit} className="space-y-4 pt-2">
+            {!editingItem && (
+              <div className="flex gap-2">
+                <Button
+                  type="button"
+                  variant={batchMode ? 'outline' : 'default'}
+                  className="flex-1"
+                  onClick={() => setBatchMode(false)}
+                >
+                  Cadastro unico
+                </Button>
+                <Button
+                  type="button"
+                  variant={batchMode ? 'default' : 'outline'}
+                  className="flex-1"
+                  onClick={() => setBatchMode(true)}
+                >
+                  Lista em lote
+                </Button>
+              </div>
+            )}
+            {batchMode && !editingItem ? (
+              <div className="space-y-2">
+                <label className="text-sm font-medium">Lista de CNPJs</label>
+                <textarea
+                  className="min-h-40 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                  placeholder={'Um por linha\n00.000.000/0000-00\n00.000.000/0000-00; Empresa XPTO'}
+                  value={batchInput}
+                  onChange={(e) => setBatchInput(e.target.value)}
+                />
+                <p className="text-xs text-muted-foreground">
+                  Aceita um CNPJ por linha, com nome opcional separado por `;`, `,` ou `-`.
+                </p>
+              </div>
+            ) : (
+              <>
             <div className="space-y-2">
               <label className="text-sm font-medium">CNPJ <span className="text-destructive">*</span></label>
               <Input
@@ -405,12 +493,14 @@ export default function TrackedCnpjsPage() {
                 onChange={(e) => setFormState({ ...formState, name: e.target.value })}
               />
             </div>
+              </>
+            )}
             <div className="flex gap-2 pt-2">
               <Button type="button" variant="outline" className="flex-1" onClick={resetDialog}>
                 Cancelar
               </Button>
               <Button type="submit" className="flex-1" disabled={saving}>
-                {saving ? <><Loader2 className="w-4 h-4 mr-2 animate-spin" /> Salvando...</> : editingItem ? 'Salvar' : 'Adicionar'}
+                {saving ? <><Loader2 className="w-4 h-4 mr-2 animate-spin" /> Salvando...</> : editingItem ? 'Salvar' : batchMode ? 'Importar lista' : 'Adicionar'}
               </Button>
             </div>
           </form>
