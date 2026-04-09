@@ -83,9 +83,14 @@ export class InstrumentsService {
       throw new NotFoundException('Instrument not found');
     }
 
-    await this.prisma.instrument.delete({
-      where: { id },
-    });
+    await this.prisma.$transaction([
+      this.prisma.instrumentParty.deleteMany({
+        where: { instrumentId: id },
+      }),
+      this.prisma.instrument.delete({
+        where: { id },
+      }),
+    ]);
 
     return { success: true };
   }
