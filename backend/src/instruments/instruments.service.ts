@@ -13,6 +13,7 @@ export class InstrumentsService {
     uf?: string;
   }) {
     const { skip, take, cnpj, isNew, uf } = params;
+    const normalizedCnpj = cnpj?.replace(/\D/g, '');
 
     const where: any = {};
     if (isNew !== undefined) {
@@ -21,10 +22,12 @@ export class InstrumentsService {
     if (uf) {
       where.uf = uf;
     }
-    if (cnpj) {
+    if (normalizedCnpj) {
       where.parties = {
         some: {
-          cnpj,
+          cnpj: {
+            contains: normalizedCnpj,
+          },
         },
       };
     }
@@ -51,5 +54,39 @@ export class InstrumentsService {
     if (!instrument) throw new NotFoundException('Instrument not found');
 
     return instrument;
+  }
+
+  async markAsRead(id: string) {
+    const instrument = await this.prisma.instrument.findUnique({
+      where: { id },
+      select: { id: true },
+    });
+
+    if (!instrument) {
+      throw new NotFoundException('Instrument not found');
+    }
+
+    return this.prisma.instrument.update({
+      where: { id },
+      data: { isNew: false },
+      include: { parties: true },
+    });
+  }
+
+  async remove(id: string) {
+    const instrument = await this.prisma.instrument.findUnique({
+      where: { id },
+      select: { id: true },
+    });
+
+    if (!instrument) {
+      throw new NotFoundException('Instrument not found');
+    }
+
+    await this.prisma.instrument.delete({
+      where: { id },
+    });
+
+    return { success: true };
   }
 }

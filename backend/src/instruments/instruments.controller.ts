@@ -1,4 +1,12 @@
-import { Controller, Get, Param, Query, UseGuards } from '@nestjs/common';
+import {
+  Controller,
+  Delete,
+  Get,
+  Param,
+  Patch,
+  Query,
+  UseGuards,
+} from '@nestjs/common';
 import { InstrumentsService } from './instruments.service';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 
@@ -27,5 +35,15 @@ export class InstrumentsController {
   @Get(':id')
   findOne(@Param('id') id: string) {
     return this.instrumentsService.findOne(id);
+  }
+
+  @Patch(':id/read')
+  markAsRead(@Param('id') id: string) {
+    return this.instrumentsService.markAsRead(id);
+  }
+
+  @Delete(':id')
+  remove(@Param('id') id: string) {
+    return this.instrumentsService.remove(id);
   }
 }

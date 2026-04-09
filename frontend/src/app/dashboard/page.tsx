@@ -5,7 +5,7 @@ import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '@/com
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
-import { Search, Filter, Download, Loader2, ExternalLink } from 'lucide-react'
+import { Search, Filter, Download, Loader2, ExternalLink, Trash2 } from 'lucide-react'
 import api from '@/lib/api'
 import { toast } from 'sonner'
 
@@ -33,8 +33,10 @@ export default function Dashboard() {
   const [instruments, setInstruments] = useState<Instrument[]>([])
   const [total, setTotal] = useState(0)
   const [loading, setLoading] = useState(true)
-  const [search, setSearch] = useState('')
+  const [searchInput, setSearchInput] = useState('')
+  const [appliedSearch, setAppliedSearch] = useState('')
   const [page, setPage] = useState(0)
+  const [busyId, setBusyId] = useState<string | null>(null)
   const PAGE_SIZE = 9
 
   const fetchInstruments = useCallback(async (reset = false) => {
@@ -45,8 +47,9 @@ export default function Dashboard() {
         skip: currentPage * PAGE_SIZE,
         take: PAGE_SIZE,
       }
-      if (search.trim()) {
-        params.cnpj = search.trim()
+      const normalizedSearch = appliedSearch.replace(/\D/g, '')
+      if (normalizedSearch) {
+        params.cnpj = normalizedSearch
       }
       const { data } = await api.get('/instruments', { params })
       setInstruments(data.data)
@@ -57,13 +60,55 @@ export default function Dashboard() {
     } finally {
       setLoading(false)
     }
-  }, [page, search])
+  }, [appliedSearch, page])
 
   useEffect(() => { fetchInstruments() }, [fetchInstruments])
 
   function handleSearch(e: React.FormEvent) {
     e.preventDefault()
-    fetchInstruments(true)
+    const nextSearch = searchInput
+    setPage(0)
+    if (nextSearch === appliedSearch) {
+      fetchInstruments(true)
+      return
+    }
+    setAppliedSearch(nextSearch)
+  }
+
+  async function handleOpen(item: Instrument) {
+    if (item.isNew) {
+      try {
+        await api.patch(`/instruments/${item.id}/read`)
+        setInstruments((current) =>
+          current.map((instrument) =>
+            instrument.id === item.id ? { ...instrument, isNew: false } : instrument,
+          ),
+        )
+      } catch {
+        toast.error('Erro ao marcar instrumento como lido')
+      }
+    }
+
+    if (item.documentLink) {
+      window.open(item.documentLink, '_blank', 'noopener,noreferrer')
+    }
+  }
+
+  async function handleDelete(item: Instrument) {
+    const confirmed = window.confirm(`Deseja excluir o instrumento ${item.externalId}?`)
+    if (!confirmed) return
+
+    setBusyId(item.id)
+    try {
+      await api.delete(`/instruments/${item.id}`)
+      setInstruments((current) => current.filter((instrument) => instrument.id !== item.id))
+      setTotal((current) => Math.max(0, current - 1))
+      toast.success('Instrumento excluido com sucesso')
+    } catch {
+      toast.error('Erro ao excluir instrumento')
+    } finally {
+      setBusyId(null)
+    }
   }
 
   const formatDate = (d?: string) =>
@@ -86,8 +131,8 @@ export default function Dashboard() {
           <Input
             placeholder="Buscar por CNPJ..."
             className="pl-9 bg-background focus-visible:ring-primary/50"
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
+            value={searchInput}
+            onChange={(e) => setSearchInput(e.target.value)}
           />
         </div>
         <div className="flex w-full sm:w-auto items-center gap-2">
@@ -140,13 +185,23 @@ export default function Dashboard() {
                   <div className="text-xs text-muted-foreground mb-4">
                     Vigência: {formatDate(item.validityStart)} → {formatDate(item.validityEnd)}
                   </div>
-                  <div className="flex justify-end">
+                  <div className="flex justify-between gap-2">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => handleDelete(item)}
+                      disabled={busyId === item.id}
+                    >
+                      {busyId === item.id ? (
+                        <Loader2 className="w-3 h-3 animate-spin" />
+                      ) : (
+                        <Trash2 className="w-3 h-3" />
+                      )}
+                    </Button>
                     {item.documentLink ? (
-                      <a href={item.documentLink} target="_blank" rel="noopener noreferrer">
-                        <Button size="sm" className="group-hover:bg-primary group-hover:text-primary-foreground transition-colors">
-                          <ExternalLink className="w-3 h-3 mr-1" /> Ver Documento
-                        </Button>
-                      </a>
+                      <Button size="sm" className="group-hover:bg-primary group-hover:text-primary-foreground transition-colors" onClick={() => handleOpen(item)}>
+                        <ExternalLink className="w-3 h-3 mr-1" /> Ver Documento
+                      </Button>
                     ) : (
                       <Button variant="ghost" size="sm" className="group-hover:bg-primary group-hover:text-primary-foreground transition-colors" disabled>
                         Sem link
