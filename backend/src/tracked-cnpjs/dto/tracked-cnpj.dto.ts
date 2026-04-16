@@ -8,12 +8,48 @@ export class CreateTrackedCnpjDto {
   @IsString()
   @IsOptional()
   name?: string;
+
+  @IsString()
+  @IsOptional()
+  employerUnionName?: string;
+
+  @IsString()
+  @IsOptional()
+  employerUnionCnpj?: string;
+
+  @IsString()
+  @IsOptional()
+  laborUnionName?: string;
+
+  @IsString()
+  @IsOptional()
+  laborUnionCnpj?: string;
 }
 
 export class UpdateTrackedCnpjDto {
   @IsString()
   @IsOptional()
   name?: string;
+
+  @IsString()
+  @IsOptional()
+  cnpj?: string;
+
+  @IsString()
+  @IsOptional()
+  employerUnionName?: string;
+
+  @IsString()
+  @IsOptional()
+  employerUnionCnpj?: string;
+
+  @IsString()
+  @IsOptional()
+  laborUnionName?: string;
+
+  @IsString()
+  @IsOptional()
+  laborUnionCnpj?: string;
 
   @IsBoolean()
   @IsOptional()

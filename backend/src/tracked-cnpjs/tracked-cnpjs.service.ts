@@ -44,8 +44,16 @@ export class TrackedCnpjsService {
 
     return this.prisma.trackedCnpj.create({
       data: {
-        cnpj: dto.cnpj,
+        cnpj: dto.cnpj.replace(/\D/g, ''),
         name: dto.name,
+        employerUnionName: dto.employerUnionName,
+        employerUnionCnpj: dto.employerUnionCnpj
+          ? dto.employerUnionCnpj.replace(/\D/g, '')
+          : undefined,
+        laborUnionName: dto.laborUnionName,
+        laborUnionCnpj: dto.laborUnionCnpj
+          ? dto.laborUnionCnpj.replace(/\D/g, '')
+          : undefined,
         organizationId,
       },
     });
@@ -71,7 +79,16 @@ export class TrackedCnpjsService {
     await this.findOne(id);
     return this.prisma.trackedCnpj.update({
       where: { id },
-      data: dto as any,
+      data: {
+        ...dto,
+        cnpj: dto.cnpj ? dto.cnpj.replace(/\D/g, '') : undefined,
+        employerUnionCnpj: dto.employerUnionCnpj
+          ? dto.employerUnionCnpj.replace(/\D/g, '')
+          : undefined,
+        laborUnionCnpj: dto.laborUnionCnpj
+          ? dto.laborUnionCnpj.replace(/\D/g, '')
+          : undefined,
+      },
     });
   }
 

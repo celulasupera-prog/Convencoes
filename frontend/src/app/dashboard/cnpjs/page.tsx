@@ -20,6 +20,10 @@ interface TrackedCnpj {
   id: string
   cnpj: string
   name?: string
+  employerUnionName?: string
+  employerUnionCnpj?: string
+  laborUnionName?: string
+  laborUnionCnpj?: string
   isActive: boolean
   updatedAt: string
 }
@@ -74,7 +78,14 @@ export default function TrackedCnpjsPage() {
   const [showRunStatus, setShowRunStatus] = useState(true)
   const [showFullLogs, setShowFullLogs] = useState(false)
   const [batchMode, setBatchMode] = useState(false)
-  const [formState, setFormState] = useState({ cnpj: '', name: '' })
+  const [formState, setFormState] = useState({
+    cnpj: '',
+    name: '',
+    employerUnionName: '',
+    employerUnionCnpj: '',
+    laborUnionName: '',
+    laborUnionCnpj: '',
+  })
   const [batchInput, setBatchInput] = useState('')
 
   async function fetchCnpjs() {
@@ -118,20 +129,41 @@ export default function TrackedCnpjsPage() {
   function resetDialog() {
     setDialogOpen(false)
     setEditingItem(null)
-    setFormState({ cnpj: '', name: '' })
+    setFormState({
+      cnpj: '',
+      name: '',
+      employerUnionName: '',
+      employerUnionCnpj: '',
+      laborUnionName: '',
+      laborUnionCnpj: '',
+    })
     setBatchMode(false)
     setBatchInput('')
   }
 
   function openCreateDialog() {
     setEditingItem(null)
-    setFormState({ cnpj: '', name: '' })
+    setFormState({
+      cnpj: '',
+      name: '',
+      employerUnionName: '',
+      employerUnionCnpj: '',
+      laborUnionName: '',
+      laborUnionCnpj: '',
+    })
     setDialogOpen(true)
   }
 
   function handleEdit(item: TrackedCnpj) {
     setEditingItem(item)
-    setFormState({ cnpj: item.cnpj, name: item.name ?? '' })
+    setFormState({
+      cnpj: item.cnpj,
+      name: item.name ?? '',
+      employerUnionName: item.employerUnionName ?? '',
+      employerUnionCnpj: item.employerUnionCnpj ?? '',
+      laborUnionName: item.laborUnionName ?? '',
+      laborUnionCnpj: item.laborUnionCnpj ?? '',
+    })
     setDialogOpen(true)
   }
 
@@ -193,6 +225,10 @@ export default function TrackedCnpjsPage() {
       const payload = {
         cnpj: formState.cnpj.replace(/\D/g, ''),
         name: formState.name || undefined,
+        employerUnionName: formState.employerUnionName || undefined,
+        employerUnionCnpj: formState.employerUnionCnpj.replace(/\D/g, '') || undefined,
+        laborUnionName: formState.laborUnionName || undefined,
+        laborUnionCnpj: formState.laborUnionCnpj.replace(/\D/g, '') || undefined,
       }
 
       if (editingItem) {
@@ -400,6 +436,28 @@ export default function TrackedCnpjsPage() {
                   <Activity className="w-4 h-4" />
                   Atualizado: <span className="font-medium text-foreground">{formatDate(item.updatedAt)}</span>
                 </div>
+                {(item.employerUnionName || item.laborUnionName) && (
+                  <div className="mb-4 space-y-2 rounded-lg border bg-background/60 p-3 text-xs">
+                    {item.employerUnionName && (
+                      <div>
+                        <p className="font-medium text-foreground">Sindicato Patronal</p>
+                        <p className="text-muted-foreground">{item.employerUnionName}</p>
+                        {item.employerUnionCnpj && (
+                          <p className="font-mono text-muted-foreground">{item.employerUnionCnpj}</p>
+                        )}
+                      </div>
+                    )}
+                    {item.laborUnionName && (
+                      <div>
+                        <p className="font-medium text-foreground">Sindicato Laboral</p>
+                        <p className="text-muted-foreground">{item.laborUnionName}</p>
+                        {item.laborUnionCnpj && (
+                          <p className="font-mono text-muted-foreground">{item.laborUnionCnpj}</p>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                )}
                 <div className="flex gap-2">
                   <Button variant="outline" className="flex-1" onClick={() => handleEdit(item)}>
                     Editar
@@ -497,6 +555,40 @@ export default function TrackedCnpjsPage() {
                 placeholder="Ex: Empresa XPTO S.A."
                 value={formState.name}
                 onChange={(e) => setFormState({ ...formState, name: e.target.value })}
+              />
+            </div>
+            <div className="space-y-2">
+              <label className="text-sm font-medium">Sindicato Patronal <span className="text-muted-foreground text-xs">(opcional)</span></label>
+              <Input
+                placeholder="Nome do sindicato patronal"
+                value={formState.employerUnionName}
+                onChange={(e) => setFormState({ ...formState, employerUnionName: e.target.value })}
+              />
+            </div>
+            <div className="space-y-2">
+              <label className="text-sm font-medium">CNPJ do Sindicato Patronal <span className="text-muted-foreground text-xs">(opcional)</span></label>
+              <Input
+                placeholder="00.000.000/0000-00"
+                value={formState.employerUnionCnpj}
+                onChange={(e) => setFormState({ ...formState, employerUnionCnpj: e.target.value })}
+                className="font-mono"
+              />
+            </div>
+            <div className="space-y-2">
+              <label className="text-sm font-medium">Sindicato Laboral <span className="text-muted-foreground text-xs">(opcional)</span></label>
+              <Input
+                placeholder="Nome do sindicato laboral"
+                value={formState.laborUnionName}
+                onChange={(e) => setFormState({ ...formState, laborUnionName: e.target.value })}
+              />
+            </div>
+            <div className="space-y-2">
+              <label className="text-sm font-medium">CNPJ do Sindicato Laboral <span className="text-muted-foreground text-xs">(opcional)</span></label>
+              <Input
+                placeholder="00.000.000/0000-00"
+                value={formState.laborUnionCnpj}
+                onChange={(e) => setFormState({ ...formState, laborUnionCnpj: e.target.value })}
+                className="font-mono"
               />
             </div>
               </>
