@@ -170,17 +170,20 @@ export class ScraperService {
 
     const logLines = [`organization:${organizationId}`];
     let newItems = 0;
+    let updatedItems = 0;
     let totalItems = 0;
 
     try {
       for (const tracked of cnpjs) {
         logLines.push(`processing:${tracked.cnpj}`);
+        logLines.push(`processing-item:${tracked.id}:${tracked.cnpj}`);
         await this.persistRunLog(runId, logLines);
 
         const scrapeResult = await this.scraperProcessor.scrapeTrackedCnpj(tracked);
         const items = scrapeResult.items;
         totalItems += items.length;
         logLines.push(`result-links:${tracked.cnpj}:items=${items.length}`);
+        logLines.push(`result-item:${tracked.id}:items=${items.length}`);
         logLines.push(
           `filled-field-strategy:${scrapeResult.diagnostics.filledFieldStrategy ?? 'unknown'}`,
         );
@@ -271,6 +274,7 @@ export class ScraperService {
             newItems += 1;
             logLines.push(`saved:new:${item.externalId}`);
           } else {
+            updatedItems += 1;
             logLines.push(`saved:update:${item.externalId}`);
           }
 
@@ -278,10 +282,13 @@ export class ScraperService {
         }
 
         logLines.push(`processed:${tracked.cnpj}:items=${items.length}`);
+        logLines.push(`processed-item:${tracked.id}:items=${items.length}`);
         await this.persistRunLog(runId, logLines);
       }
 
-      logLines.push(`completed:new=${newItems}:total=${totalItems}`);
+      logLines.push(
+        `completed:new=${newItems}:updated=${updatedItems}:total=${totalItems}`,
+      );
 
       await this.prisma.searchRun.update({
         where: { id: runId },

@@ -37,6 +37,14 @@ interface SearchRun {
   logs?: string | null
 }
 
+interface TrackedProgressItem {
+  id: string
+  label: string
+  secondaryLabel: string
+  status: 'PENDING' | 'RUNNING' | 'DONE_WITH_RESULTS' | 'DONE_NO_RESULTS' | 'FAILED'
+  resultCount: number | null
+}
+
 function parseRunLogs(logs: string[]) {
   const findValue = (prefix: string) =>
     logs.find((line) => line.startsWith(prefix))?.slice(prefix.length)
@@ -46,14 +54,23 @@ function parseRunLogs(logs: string[]) {
   const ajaxAttempts = findValue('ajax-attempt-count:')
   const debugPath = findValue('debug-artifact-base-path:')
   const completed = findValue('completed:')
+  const completedMatch = completed?.match(/new=(\d+):updated=(\d+):total=(\d+)/)
+  const legacyCompletedMatch = completed?.match(/new=(\d+):total=(\d+)/)
 
   const isPortalFailure =
     failedMessage?.includes('Falha no portal do MTE') ||
     ajaxStatus === '500'
 
-  let summary =
-    failedMessage ||
-    (completed ? `Varredura concluida: ${completed}` : 'Nenhuma varredura executada ainda.')
+  let summary = failedMessage || 'Nenhuma varredura executada ainda.'
+
+  if (completedMatch) {
+    const [, newCount, updatedCount, totalCount] = completedMatch
+    summary = `Varredura concluida: ${newCount} novo(s), ${updatedCount} atualizado(s), ${totalCount} resultado(s) no total.`
+  } else if (legacyCompletedMatch) {
+    const [, newCount, totalCount] = legacyCompletedMatch
+    const updatedCount = Math.max(Number(totalCount) - Number(newCount), 0)
+    summary = `Varredura concluida: ${newCount} novo(s), ${updatedCount} atualizado(s), ${totalCount} resultado(s) no total.`
+  }
 
   if (isPortalFailure) {
     summary = `Portal do MTE indisponivel no momento${ajaxAttempts ? ` apos ${ajaxAttempts} tentativa(s)` : ''}.`
@@ -61,9 +78,141 @@ function parseRunLogs(logs: string[]) {
 
   return {
     ajaxAttempts,
+    completed,
     debugPath,
     isPortalFailure,
     summary,
+  }
+}
+
+function parseTrackedProgress(logs: string[], trackedItems: TrackedCnpj[]): TrackedProgressItem[] {
+  const progressMap = new Map(
+    trackedItems.map((item) => [
+      item.id,
+      {
+        id: item.id,
+        label: item.employerUnionName || item.name || 'Sindicato patronal sem nome',
+        secondaryLabel: [item.employerUnionCnpj || item.cnpj, item.laborUnionName]
+          .filter(Boolean)
+          .join(' • '),
+        status: 'PENDING' as TrackedProgressItem['status'],
+        resultCount: null as number | null,
+      },
+    ]),
+  )
+
+  const fallbackByCnpj = new Map<string, string[]>()
+  for (const item of trackedItems) {
+    const key = item.cnpj.replace(/\D/g, '')
+    const current = fallbackByCnpj.get(key) ?? []
+    current.push(item.id)
+    fallbackByCnpj.set(key, current)
+  }
+
+  const assignByCnpj = (
+    rawCnpj: string,
+    updater: (entry: TrackedProgressItem) => void,
+  ) => {
+    const ids = fallbackByCnpj.get(rawCnpj.replace(/\D/g, '')) ?? []
+    const targetId = ids.find((id) => progressMap.get(id)?.status === 'PENDING') ?? ids[0]
+    if (!targetId) return
+    const entry = progressMap.get(targetId)
+    if (!entry) return
+    updater(entry)
+  }
+
+  for (const line of logs) {
+    if (line.startsWith('processing-item:')) {
+      const [, id] = line.split(':')
+      const entry = progressMap.get(id)
+      if (entry) entry.status = 'RUNNING'
+      continue
+    }
+
+    if (line.startsWith('result-item:')) {
+      const match = line.match(/^result-item:([^:]+):items=(\d+)$/)
+      if (!match) continue
+      const [, id, countText] = match
+      const entry = progressMap.get(id)
+      if (!entry) continue
+      const count = Number(countText)
+      entry.resultCount = count
+      entry.status = count > 0 ? 'DONE_WITH_RESULTS' : 'DONE_NO_RESULTS'
+      continue
+    }
+
+    if (line.startsWith('processed-item:')) {
+      const match = line.match(/^processed-item:([^:]+):items=(\d+)$/)
+      if (!match) continue
+      const [, id, countText] = match
+      const entry = progressMap.get(id)
+      if (!entry) continue
+      const count = Number(countText)
+      entry.resultCount = count
+      entry.status = count > 0 ? 'DONE_WITH_RESULTS' : 'DONE_NO_RESULTS'
+      continue
+    }
+
+    if (line.startsWith('processing:')) {
+      assignByCnpj(line.slice('processing:'.length), (entry) => {
+        if (entry.status === 'PENDING') entry.status = 'RUNNING'
+      })
+      continue
+    }
+
+    if (line.startsWith('processed:')) {
+      const match = line.match(/^processed:(.+):items=(\d+)$/)
+      if (!match) continue
+      const [, cnpj, countText] = match
+      assignByCnpj(cnpj, (entry) => {
+        const count = Number(countText)
+        entry.resultCount = count
+        entry.status = count > 0 ? 'DONE_WITH_RESULTS' : 'DONE_NO_RESULTS'
+      })
+    }
+  }
+
+  const failedMessage = logs.find((line) => line.startsWith('failed:'))
+  if (failedMessage) {
+    for (const entry of progressMap.values()) {
+      if (entry.status === 'RUNNING') {
+        entry.status = 'FAILED'
+      }
+    }
+  }
+
+  return trackedItems
+    .map((item) => progressMap.get(item.id))
+    .filter((entry): entry is TrackedProgressItem => Boolean(entry))
+}
+
+function getProgressBadgeVariant(status: TrackedProgressItem['status']) {
+  switch (status) {
+    case 'DONE_WITH_RESULTS':
+      return 'default'
+    case 'DONE_NO_RESULTS':
+      return 'secondary'
+    case 'FAILED':
+      return 'destructive'
+    case 'RUNNING':
+      return 'secondary'
+    default:
+      return 'outline'
+  }
+}
+
+function getProgressLabel(status: TrackedProgressItem['status']) {
+  switch (status) {
+    case 'RUNNING':
+      return 'Consultando agora'
+    case 'DONE_WITH_RESULTS':
+      return 'Com resultado'
+    case 'DONE_NO_RESULTS':
+      return 'Sem resultado'
+    case 'FAILED':
+      return 'Falhou'
+    default:
+      return 'Aguardando'
   }
 }
 
@@ -303,6 +452,7 @@ export default function TrackedCnpjsPage() {
   const hasRunning = runs.some((run) => run.status === 'RUNNING')
   const latestLogs = latestRun?.logs?.split('\n').filter(Boolean) ?? []
   const latestRunInfo = parseRunLogs(latestLogs)
+  const trackedProgress = parseTrackedProgress(latestLogs, cnpjs)
   const displayedLogs = showFullLogs ? latestLogs : latestLogs.slice(0, 8)
 
   return (
@@ -382,6 +532,41 @@ export default function TrackedCnpjsPage() {
                   Debug local: {latestRunInfo.debugPath}
                 </p>
               )}
+            </div>
+          )}
+          {trackedProgress.length > 0 && (
+            <div className="rounded-lg border bg-background/60 p-3">
+              <div className="mb-3 flex items-center justify-between gap-2">
+                <p className="text-sm font-medium">Acompanhamento por dupla sindical</p>
+                <span className="text-xs text-muted-foreground">
+                  {trackedProgress.filter((item) => item.status === 'RUNNING').length > 0
+                    ? 'Atualiza automaticamente durante a varredura'
+                    : `${trackedProgress.filter((item) => item.status !== 'PENDING').length} de ${trackedProgress.length} processadas`}
+                </span>
+              </div>
+              <div className="space-y-2">
+                {trackedProgress.map((item) => (
+                  <div
+                    key={item.id}
+                    className="flex flex-col gap-2 rounded-lg border border-border/60 bg-card/60 p-3 md:flex-row md:items-center md:justify-between"
+                  >
+                    <div className="min-w-0">
+                      <p className="truncate text-sm font-medium text-foreground">{item.label}</p>
+                      <p className="truncate text-xs text-muted-foreground">{item.secondaryLabel}</p>
+                    </div>
+                    <div className="flex items-center gap-2 self-start md:self-center">
+                      <Badge variant={getProgressBadgeVariant(item.status)}>
+                        {getProgressLabel(item.status)}
+                      </Badge>
+                      {item.resultCount !== null && (
+                        <span className="text-xs text-muted-foreground">
+                          {item.resultCount} resultado(s)
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
             </div>
           )}
           <div className="rounded-lg border bg-background/60 p-3">
