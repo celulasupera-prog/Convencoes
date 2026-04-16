@@ -71,6 +71,7 @@ export default function TrackedCnpjsPage() {
   const [triggeringRun, setTriggeringRun] = useState(false)
   const [editingItem, setEditingItem] = useState<TrackedCnpj | null>(null)
   const [busyId, setBusyId] = useState<string | null>(null)
+  const [showRunStatus, setShowRunStatus] = useState(true)
   const [showFullLogs, setShowFullLogs] = useState(false)
   const [batchMode, setBatchMode] = useState(false)
   const [formState, setFormState] = useState({ cnpj: '', name: '' })
@@ -274,9 +275,13 @@ export default function TrackedCnpjsPage() {
       </div>
 
       <Card className="border-border/60 bg-card/80">
-        <CardHeader className="pb-3">
+        <CardHeader className="flex flex-row items-center justify-between pb-3">
           <CardTitle className="text-lg font-heading">Status da Varredura</CardTitle>
+          <Button variant="ghost" size="sm" onClick={() => setShowRunStatus((current) => !current)}>
+            {showRunStatus ? 'Mostrar menos' : 'Mostrar mais'}
+          </Button>
         </CardHeader>
+        {showRunStatus && (
         <CardContent className="space-y-4">
           <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
             <div className="space-y-1">
@@ -355,6 +360,7 @@ export default function TrackedCnpjsPage() {
             </div>
           )}
         </CardContent>
+        )}
       </Card>
 
       {loading ? (
