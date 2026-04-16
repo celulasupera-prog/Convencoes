@@ -24,6 +24,10 @@ export class CreateTrackedCnpjDto {
   @IsString()
   @IsOptional()
   laborUnionCnpj?: string;
+
+  @IsString()
+  @IsOptional()
+  baseMonth?: string;
 }
 
 export class UpdateTrackedCnpjDto {
@@ -50,6 +54,10 @@ export class UpdateTrackedCnpjDto {
   @IsString()
   @IsOptional()
   laborUnionCnpj?: string;
+
+  @IsString()
+  @IsOptional()
+  baseMonth?: string;
 
   @IsBoolean()
   @IsOptional()

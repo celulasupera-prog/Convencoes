@@ -24,6 +24,7 @@ interface TrackedCnpj {
   employerUnionCnpj?: string
   laborUnionName?: string
   laborUnionCnpj?: string
+  baseMonth?: string
   isActive: boolean
   updatedAt: string
 }
@@ -85,6 +86,7 @@ export default function TrackedCnpjsPage() {
     employerUnionCnpj: '',
     laborUnionName: '',
     laborUnionCnpj: '',
+    baseMonth: '',
   })
   const [batchInput, setBatchInput] = useState('')
 
@@ -136,6 +138,7 @@ export default function TrackedCnpjsPage() {
       employerUnionCnpj: '',
       laborUnionName: '',
       laborUnionCnpj: '',
+      baseMonth: '',
     })
     setBatchMode(false)
     setBatchInput('')
@@ -150,6 +153,7 @@ export default function TrackedCnpjsPage() {
       employerUnionCnpj: '',
       laborUnionName: '',
       laborUnionCnpj: '',
+      baseMonth: '',
     })
     setDialogOpen(true)
   }
@@ -163,6 +167,7 @@ export default function TrackedCnpjsPage() {
       employerUnionCnpj: item.employerUnionCnpj ?? item.cnpj,
       laborUnionName: item.laborUnionName ?? '',
       laborUnionCnpj: item.laborUnionCnpj ?? '',
+      baseMonth: item.baseMonth ?? '',
     })
     setDialogOpen(true)
   }
@@ -190,14 +195,25 @@ export default function TrackedCnpjsPage() {
 
         const parsedItems = rows
           .map((line) => {
-            const [cnpjPart, ...nameParts] = line.split(/[;,|-]/)
-            const parsedCnpj = cnpjPart.replace(/\D/g, '')
-            const parsedName = nameParts.join(' ').trim() || undefined
+            const columns = line.includes('\t')
+              ? line.split('\t').map((part) => part.trim())
+              : line.split(/[;,]/).map((part) => part.trim())
+            const [
+              laborUnionName,
+              laborUnionCnpj,
+              employerUnionName,
+              employerUnionCnpj,
+              baseMonth,
+            ] = columns
+            const parsedEmployerUnionCnpj = (employerUnionCnpj ?? columns[0] ?? '').replace(/\D/g, '')
             return {
-              cnpj: parsedCnpj,
-              name: parsedName,
-              employerUnionName: parsedName,
-              employerUnionCnpj: parsedCnpj,
+              cnpj: parsedEmployerUnionCnpj,
+              name: employerUnionName || undefined,
+              employerUnionName: employerUnionName || undefined,
+              employerUnionCnpj: parsedEmployerUnionCnpj,
+              laborUnionName: laborUnionName || undefined,
+              laborUnionCnpj: (laborUnionCnpj ?? '').replace(/\D/g, '') || undefined,
+              baseMonth: baseMonth || undefined,
             }
           })
           .filter((item) => item.cnpj.length === 14)
@@ -233,6 +249,7 @@ export default function TrackedCnpjsPage() {
         employerUnionCnpj: formState.employerUnionCnpj.replace(/\D/g, '') || formState.cnpj.replace(/\D/g, '') || undefined,
         laborUnionName: formState.laborUnionName || undefined,
         laborUnionCnpj: formState.laborUnionCnpj.replace(/\D/g, '') || undefined,
+        baseMonth: formState.baseMonth || undefined,
       }
 
       if (editingItem) {
@@ -464,6 +481,12 @@ export default function TrackedCnpjsPage() {
                         )}
                       </div>
                     )}
+                    {item.baseMonth && (
+                      <div>
+                        <p className="font-medium text-foreground">Data-base</p>
+                        <p className="text-muted-foreground">{item.baseMonth}</p>
+                      </div>
+                    )}
                   </div>
                 )}
                 <div className="flex gap-2">
@@ -537,12 +560,12 @@ export default function TrackedCnpjsPage() {
                 <label className="text-sm font-medium">Lista de CNPJs</label>
                 <textarea
                   className="min-h-40 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
-                  placeholder={'Um por linha\n00.000.000/0000-00\n00.000.000/0000-00; Sindicato Patronal'}
+                  placeholder={'Cole as 5 colunas da planilha\nSindicato laboral<TAB>CNPJ laboral<TAB>Sindicato patronal<TAB>CNPJ patronal<TAB>Data-base'}
                   value={batchInput}
                   onChange={(e) => setBatchInput(e.target.value)}
                 />
                 <p className="text-xs text-muted-foreground">
-                  Aceita um CNPJ patronal por linha, com nome opcional do sindicato patronal separado por `;`, `,` ou `-`.
+                  Aceita cola direta do Excel com 5 colunas: sindicato laboral, CNPJ laboral, sindicato patronal, CNPJ patronal e data-base.
                 </p>
               </div>
             ) : (
@@ -583,6 +606,14 @@ export default function TrackedCnpjsPage() {
                 onChange={(e) => setFormState({ ...formState, laborUnionCnpj: e.target.value })}
                 className="font-mono"
                 required
+              />
+            </div>
+            <div className="space-y-2">
+              <label className="text-sm font-medium">Mes da Data-base <span className="text-muted-foreground text-xs">(opcional)</span></label>
+              <Input
+                placeholder="Ex: marco, 03, abril"
+                value={formState.baseMonth}
+                onChange={(e) => setFormState({ ...formState, baseMonth: e.target.value })}
               />
             </div>
               </>

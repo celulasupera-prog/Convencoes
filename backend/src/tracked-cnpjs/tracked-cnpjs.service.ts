@@ -56,6 +56,7 @@ export class TrackedCnpjsService {
         laborUnionCnpj: dto.laborUnionCnpj
           ? dto.laborUnionCnpj.replace(/\D/g, '')
           : undefined,
+        baseMonth: dto.baseMonth,
         organizationId,
       },
     });
@@ -98,6 +99,7 @@ export class TrackedCnpjsService {
         laborUnionCnpj: dto.laborUnionCnpj
           ? dto.laborUnionCnpj.replace(/\D/g, '')
           : undefined,
+        baseMonth: dto.baseMonth,
       },
     });
   }
