@@ -8,6 +8,13 @@ import { Cron, CronExpression } from '@nestjs/schedule';
 import { PrismaService } from '../prisma/prisma.service';
 import { MediadorSearchError, ScraperProcessor } from './scraper.processor';
 
+class RunCancelledError extends Error {
+  constructor(message = 'Consulta interrompida manualmente') {
+    super(message);
+    this.name = 'RunCancelledError';
+  }
+}
+
 @Injectable()
 export class ScraperService {
   private readonly logger = new Logger(ScraperService.name);
@@ -106,6 +113,54 @@ export class ScraperService {
     return run;
   }
 
+  async cancelRun(id: string, userId: string) {
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: { organizationId: true },
+    });
+
+    if (!user?.organizationId) {
+      throw new NotFoundException('Usuario sem organizacao associada');
+    }
+
+    const run = await this.prisma.searchRun.findUnique({
+      where: { id },
+    });
+
+    if (!run || !run.logs?.includes(`organization:${user.organizationId}`)) {
+      throw new NotFoundException('Execucao nao encontrada');
+    }
+
+    if (run.status !== 'RUNNING') {
+      return {
+        id: run.id,
+        status: run.status,
+        message: 'A varredura ja foi finalizada',
+      };
+    }
+
+    const cancellationLine = `cancelled:manual:${userId}:${new Date().toISOString()}`;
+    const updatedLogs = [run.logs, cancellationLine, 'failed:Consulta interrompida manualmente']
+      .filter(Boolean)
+      .join('\n');
+
+    const updatedRun = await this.prisma.searchRun.update({
+      where: { id },
+      data: {
+        status: 'FAILED',
+        finishedAt: new Date(),
+        logs: updatedLogs,
+      },
+    });
+
+    return {
+      id: updatedRun.id,
+      status: updatedRun.status,
+      finishedAt: updatedRun.finishedAt,
+      message: 'Varredura interrompida com sucesso',
+    };
+  }
+
   private async startRunForOrganization(
     organizationId: string,
     triggeredBy: string,
@@ -175,11 +230,13 @@ export class ScraperService {
 
     try {
       for (const tracked of cnpjs) {
+        await this.ensureRunActive(runId);
         logLines.push(`processing:${tracked.cnpj}`);
         logLines.push(`processing-item:${tracked.id}:${tracked.cnpj}`);
         await this.persistRunLog(runId, logLines);
 
         const scrapeResult = await this.scraperProcessor.scrapeTrackedCnpj(tracked);
+        await this.ensureRunActive(runId);
         const items = scrapeResult.items;
         totalItems += items.length;
         logLines.push(`result-links:${tracked.cnpj}:items=${items.length}`);
@@ -234,6 +291,7 @@ export class ScraperService {
         await this.persistRunLog(runId, logLines);
 
         for (const item of items) {
+          await this.ensureRunActive(runId);
           const existing = await this.prisma.instrument.findUnique({
             where: { externalId: item.externalId },
           });
@@ -286,6 +344,7 @@ export class ScraperService {
         await this.persistRunLog(runId, logLines);
       }
 
+      await this.ensureRunActive(runId);
       logLines.push(
         `completed:new=${newItems}:updated=${updatedItems}:total=${totalItems}`,
       );
@@ -299,6 +358,27 @@ export class ScraperService {
         },
       });
     } catch (error: any) {
+      if (error instanceof RunCancelledError) {
+        const currentRun = await this.prisma.searchRun.findUnique({
+          where: { id: runId },
+        });
+
+        if (currentRun?.status === 'FAILED' && currentRun.finishedAt) {
+          return;
+        }
+
+        logLines.push('failed:Consulta interrompida manualmente');
+        await this.prisma.searchRun.update({
+          where: { id: runId },
+          data: {
+            status: 'FAILED',
+            finishedAt: new Date(),
+            logs: logLines.join('\n'),
+          },
+        });
+        return;
+      }
+
       if (error instanceof MediadorSearchError) {
         if (error.diagnostics.ajaxResponseUrl) {
           logLines.push(`ajax-response-url:${error.diagnostics.ajaxResponseUrl}`);
@@ -395,5 +475,16 @@ export class ScraperService {
         logs: logLines.join('\n'),
       },
     });
+  }
+
+  private async ensureRunActive(runId: string) {
+    const run = await this.prisma.searchRun.findUnique({
+      where: { id: runId },
+      select: { status: true, logs: true },
+    });
+
+    if (!run || run.status !== 'RUNNING' || run.logs?.includes('cancelled:manual:')) {
+      throw new RunCancelledError();
+    }
   }
 }

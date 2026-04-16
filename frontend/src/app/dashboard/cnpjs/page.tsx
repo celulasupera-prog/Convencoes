@@ -50,6 +50,7 @@ function parseRunLogs(logs: string[]) {
     logs.find((line) => line.startsWith(prefix))?.slice(prefix.length)
 
   const failedMessage = findValue('failed:')
+  const isCancelled = logs.some((line) => line.startsWith('cancelled:manual:'))
   const ajaxStatus = findValue('ajax-response-status:')
   const ajaxAttempts = findValue('ajax-attempt-count:')
   const debugPath = findValue('debug-artifact-base-path:')
@@ -74,12 +75,15 @@ function parseRunLogs(logs: string[]) {
 
   if (isPortalFailure) {
     summary = `Portal do MTE indisponivel no momento${ajaxAttempts ? ` apos ${ajaxAttempts} tentativa(s)` : ''}.`
+  } else if (isCancelled) {
+    summary = 'Varredura interrompida manualmente.'
   }
 
   return {
     ajaxAttempts,
     completed,
     debugPath,
+    isCancelled,
     isPortalFailure,
     summary,
   }
@@ -223,6 +227,7 @@ export default function TrackedCnpjsPage() {
   const [dialogOpen, setDialogOpen] = useState(false)
   const [saving, setSaving] = useState(false)
   const [triggeringRun, setTriggeringRun] = useState(false)
+  const [cancellingRun, setCancellingRun] = useState(false)
   const [editingItem, setEditingItem] = useState<TrackedCnpj | null>(null)
   const [busyId, setBusyId] = useState<string | null>(null)
   const [showRunStatus, setShowRunStatus] = useState(true)
@@ -447,6 +452,25 @@ export default function TrackedCnpjsPage() {
     }
   }
 
+  async function handleCancelRun() {
+    if (!latestRun || latestRun.status !== 'RUNNING') return
+
+    const confirmed = window.confirm('Deseja interromper a varredura em andamento?')
+    if (!confirmed) return
+
+    setCancellingRun(true)
+    try {
+      await api.post(`/scraper/runs/${latestRun.id}/cancel`)
+      toast.success('Varredura interrompida com sucesso')
+      fetchRuns()
+      fetchCnpjs()
+    } catch {
+      toast.error('Erro ao interromper a varredura')
+    } finally {
+      setCancellingRun(false)
+    }
+  }
+
   const formatDate = (d: string) => new Date(d).toLocaleString('pt-BR')
   const latestRun = runs[0]
   const hasRunning = runs.some((run) => run.status === 'RUNNING')
@@ -492,15 +516,17 @@ export default function TrackedCnpjsPage() {
         <CardContent className="space-y-4">
           <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
             <div className="space-y-1">
-              <div className="flex items-center gap-2">
-                <Badge variant={latestRun?.status === 'FAILED' ? 'destructive' : latestRun?.status === 'SUCCESS' ? 'default' : 'secondary'}>
-                  {latestRun?.status === 'RUNNING'
-                    ? 'Em execucao'
-                    : latestRun?.status === 'SUCCESS'
-                      ? 'Concluida'
-                      : latestRun?.status === 'FAILED'
-                        ? 'Falhou'
-                        : 'Sem execucao'}
+                <div className="flex items-center gap-2">
+                  <Badge variant={latestRun?.status === 'FAILED' ? 'destructive' : latestRun?.status === 'SUCCESS' ? 'default' : 'secondary'}>
+                    {latestRun?.status === 'RUNNING'
+                      ? 'Em execucao'
+                      : latestRunInfo.isCancelled
+                        ? 'Cancelada'
+                      : latestRun?.status === 'SUCCESS'
+                        ? 'Concluida'
+                        : latestRun?.status === 'FAILED'
+                          ? 'Falhou'
+                          : 'Sem execucao'}
                 </Badge>
                 {latestRun?.startedAt && (
                   <span className="text-sm text-muted-foreground">
@@ -515,9 +541,24 @@ export default function TrackedCnpjsPage() {
               </div>
               <p className="text-sm text-muted-foreground">{latestRunInfo.summary}</p>
             </div>
-            <Button variant="ghost" onClick={() => { fetchRuns(); fetchCnpjs() }}>
-              <RefreshCw className="w-4 h-4 mr-2" /> Atualizar status
-            </Button>
+            <div className="flex gap-2">
+              {hasRunning && latestRun?.status === 'RUNNING' && (
+                <Button
+                  variant="destructive"
+                  onClick={handleCancelRun}
+                  disabled={cancellingRun}
+                >
+                  {cancellingRun ? (
+                    <><Loader2 className="w-4 h-4 mr-2 animate-spin" /> Parando...</>
+                  ) : (
+                    'Parar varredura'
+                  )}
+                </Button>
+              )}
+              <Button variant="ghost" onClick={() => { fetchRuns(); fetchCnpjs() }}>
+                <RefreshCw className="w-4 h-4 mr-2" /> Atualizar status
+              </Button>
+            </div>
           </div>
           {latestRunInfo.isPortalFailure && (
             <div className="rounded-lg border border-destructive/30 bg-destructive/5 p-3 text-sm">

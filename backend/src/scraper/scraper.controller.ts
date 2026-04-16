@@ -28,4 +28,9 @@ export class ScraperController {
   findRun(@Param('id') id: string) {
     return this.scraperService.findRun(id);
   }
+
+  @Post('runs/:id/cancel')
+  cancelRun(@Param('id') id: string, @Request() req: any) {
+    return this.scraperService.cancelRun(id, req.user.id);
+  }
 }
