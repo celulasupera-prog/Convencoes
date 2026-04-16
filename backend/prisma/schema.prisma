@@ -48,7 +48,7 @@ model Organization {
 
 model TrackedCnpj {
   id             String       @id @default(uuid())
-  cnpj           String       @unique
+  cnpj           String
   name           String?
   employerUnionName String?
   employerUnionCnpj String?
@@ -60,6 +60,8 @@ model TrackedCnpj {
   organizationId String
   createdAt      DateTime     @default(now())
   updatedAt      DateTime     @updatedAt
+
+  @@unique([organizationId, employerUnionCnpj, laborUnionCnpj])
 }
 
 model Instrument {

@@ -36,15 +36,21 @@ export class TrackedCnpjsService {
     const baseEmployerUnionCnpj =
       dto.employerUnionCnpj?.replace(/\D/g, '') ?? dto.cnpj.replace(/\D/g, '');
     const baseEmployerUnionName = dto.employerUnionName ?? dto.name;
+    const normalizedLaborUnionCnpj = dto.laborUnionCnpj
+      ? dto.laborUnionCnpj.replace(/\D/g, '')
+      : undefined;
+    const organizationId = await this.ensureUserOrganization(userId);
 
-    const existing = await this.prisma.trackedCnpj.findUnique({
-      where: { cnpj: baseEmployerUnionCnpj },
+    const existing = await this.prisma.trackedCnpj.findFirst({
+      where: {
+        organizationId,
+        employerUnionCnpj: baseEmployerUnionCnpj,
+        laborUnionCnpj: normalizedLaborUnionCnpj,
+      },
     });
     if (existing) {
-      throw new ConflictException('CNPJ is already tracked');
+      throw new ConflictException('Esta dupla sindical ja esta cadastrada');
     }
-
-    const organizationId = await this.ensureUserOrganization(userId);
 
     return this.prisma.trackedCnpj.create({
       data: {
@@ -53,9 +59,7 @@ export class TrackedCnpjsService {
         employerUnionName: baseEmployerUnionName,
         employerUnionCnpj: baseEmployerUnionCnpj,
         laborUnionName: dto.laborUnionName,
-        laborUnionCnpj: dto.laborUnionCnpj
-          ? dto.laborUnionCnpj.replace(/\D/g, '')
-          : undefined,
+        laborUnionCnpj: normalizedLaborUnionCnpj,
         baseMonth: dto.baseMonth,
         organizationId,
       },
@@ -79,14 +83,31 @@ export class TrackedCnpjsService {
   }
 
   async update(id: string, dto: UpdateTrackedCnpjDto) {
-    await this.findOne(id);
+    const current = await this.findOne(id);
 
     const baseEmployerUnionCnpj = dto.employerUnionCnpj
       ? dto.employerUnionCnpj.replace(/\D/g, '')
       : dto.cnpj
         ? dto.cnpj.replace(/\D/g, '')
-        : undefined;
+        : current.employerUnionCnpj ?? current.cnpj;
     const baseEmployerUnionName = dto.employerUnionName ?? dto.name;
+    const normalizedLaborUnionCnpj = dto.laborUnionCnpj
+      ? dto.laborUnionCnpj.replace(/\D/g, '')
+      : current.laborUnionCnpj;
+    const duplicate = await this.prisma.trackedCnpj.findFirst({
+      where: {
+        organizationId: current.organizationId,
+        employerUnionCnpj: baseEmployerUnionCnpj,
+        laborUnionCnpj: normalizedLaborUnionCnpj,
+        NOT: {
+          id,
+        },
+      },
+    });
+
+    if (duplicate) {
+      throw new ConflictException('Esta dupla sindical ja esta cadastrada');
+    }
 
     return this.prisma.trackedCnpj.update({
       where: { id },
@@ -96,9 +117,7 @@ export class TrackedCnpjsService {
         name: baseEmployerUnionName,
         employerUnionName: baseEmployerUnionName,
         employerUnionCnpj: baseEmployerUnionCnpj,
-        laborUnionCnpj: dto.laborUnionCnpj
-          ? dto.laborUnionCnpj.replace(/\D/g, '')
-          : undefined,
+        laborUnionCnpj: normalizedLaborUnionCnpj,
         baseMonth: dto.baseMonth,
       },
     });
