@@ -157,10 +157,10 @@ export default function TrackedCnpjsPage() {
   function handleEdit(item: TrackedCnpj) {
     setEditingItem(item)
     setFormState({
-      cnpj: item.cnpj,
-      name: item.name ?? '',
-      employerUnionName: item.employerUnionName ?? '',
-      employerUnionCnpj: item.employerUnionCnpj ?? '',
+      cnpj: item.employerUnionCnpj ?? item.cnpj,
+      name: item.employerUnionName ?? item.name ?? '',
+      employerUnionName: item.employerUnionName ?? item.name ?? '',
+      employerUnionCnpj: item.employerUnionCnpj ?? item.cnpj,
       laborUnionName: item.laborUnionName ?? '',
       laborUnionCnpj: item.laborUnionCnpj ?? '',
     })
@@ -191,9 +191,13 @@ export default function TrackedCnpjsPage() {
         const parsedItems = rows
           .map((line) => {
             const [cnpjPart, ...nameParts] = line.split(/[;,|-]/)
+            const parsedCnpj = cnpjPart.replace(/\D/g, '')
+            const parsedName = nameParts.join(' ').trim() || undefined
             return {
-              cnpj: cnpjPart.replace(/\D/g, ''),
-              name: nameParts.join(' ').trim() || undefined,
+              cnpj: parsedCnpj,
+              name: parsedName,
+              employerUnionName: parsedName,
+              employerUnionCnpj: parsedCnpj,
             }
           })
           .filter((item) => item.cnpj.length === 14)
@@ -223,10 +227,10 @@ export default function TrackedCnpjsPage() {
       }
 
       const payload = {
-        cnpj: formState.cnpj.replace(/\D/g, ''),
-        name: formState.name || undefined,
-        employerUnionName: formState.employerUnionName || undefined,
-        employerUnionCnpj: formState.employerUnionCnpj.replace(/\D/g, '') || undefined,
+        cnpj: formState.employerUnionCnpj.replace(/\D/g, '') || formState.cnpj.replace(/\D/g, ''),
+        name: formState.employerUnionName || formState.name || undefined,
+        employerUnionName: formState.employerUnionName || formState.name || undefined,
+        employerUnionCnpj: formState.employerUnionCnpj.replace(/\D/g, '') || formState.cnpj.replace(/\D/g, '') || undefined,
         laborUnionName: formState.laborUnionName || undefined,
         laborUnionCnpj: formState.laborUnionCnpj.replace(/\D/g, '') || undefined,
       }
@@ -428,8 +432,12 @@ export default function TrackedCnpjsPage() {
                     {item.isActive ? 'Ativo' : 'Pausado'}
                   </Badge>
                 </div>
-                <CardTitle className="text-xl font-heading">{item.name || 'Sem nome'}</CardTitle>
-                <div className="text-sm font-mono text-muted-foreground">{item.cnpj}</div>
+                <CardTitle className="text-xl font-heading">
+                  {item.employerUnionName || item.name || 'Sindicato patronal sem nome'}
+                </CardTitle>
+                <div className="text-sm font-mono text-muted-foreground">
+                  {item.employerUnionCnpj || item.cnpj}
+                </div>
               </CardHeader>
               <CardContent className="pt-4 relative z-20">
                 <div className="flex items-center gap-2 text-sm text-muted-foreground mb-4">
@@ -495,12 +503,12 @@ export default function TrackedCnpjsPage() {
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
             <DialogTitle className="font-heading text-xl">
-              {editingItem ? 'Editar CNPJ' : 'Adicionar CNPJ'}
+              {editingItem ? 'Editar Dupla Sindical' : 'Adicionar Dupla Sindical'}
             </DialogTitle>
             <DialogDescription>
               {editingItem
-                ? 'Atualize os dados da empresa monitorada.'
-                : 'Insira o CNPJ da empresa para iniciar o monitoramento automatico.'}
+                ? 'Atualize os dados principais da dupla sindical usada no monitoramento.'
+                : 'Cadastre sindicato patronal e sindicato laboral para iniciar o monitoramento.'}
             </DialogDescription>
           </DialogHeader>
           <form onSubmit={handleSubmit} className="space-y-4 pt-2">
@@ -529,66 +537,52 @@ export default function TrackedCnpjsPage() {
                 <label className="text-sm font-medium">Lista de CNPJs</label>
                 <textarea
                   className="min-h-40 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
-                  placeholder={'Um por linha\n00.000.000/0000-00\n00.000.000/0000-00; Empresa XPTO'}
+                  placeholder={'Um por linha\n00.000.000/0000-00\n00.000.000/0000-00; Sindicato Patronal'}
                   value={batchInput}
                   onChange={(e) => setBatchInput(e.target.value)}
                 />
                 <p className="text-xs text-muted-foreground">
-                  Aceita um CNPJ por linha, com nome opcional separado por `;`, `,` ou `-`.
+                  Aceita um CNPJ patronal por linha, com nome opcional do sindicato patronal separado por `;`, `,` ou `-`.
                 </p>
               </div>
             ) : (
               <>
             <div className="space-y-2">
-              <label className="text-sm font-medium">CNPJ <span className="text-destructive">*</span></label>
+              <label className="text-sm font-medium">Nome do Sindicato Patronal <span className="text-destructive">*</span></label>
+              <Input
+                placeholder="Nome do sindicato patronal"
+                value={formState.employerUnionName}
+                onChange={(e) => setFormState({ ...formState, employerUnionName: e.target.value })}
+                required
+              />
+            </div>
+            <div className="space-y-2">
+              <label className="text-sm font-medium">CNPJ do Sindicato Patronal <span className="text-destructive">*</span></label>
               <Input
                 placeholder="00.000.000/0000-00"
-                value={formState.cnpj}
-                onChange={(e) => setFormState({ ...formState, cnpj: e.target.value })}
+                value={formState.employerUnionCnpj}
+                onChange={(e) => setFormState({ ...formState, employerUnionCnpj: e.target.value, cnpj: e.target.value })}
                 className="font-mono"
                 required
               />
             </div>
             <div className="space-y-2">
-              <label className="text-sm font-medium">Nome da Empresa <span className="text-muted-foreground text-xs">(opcional)</span></label>
-              <Input
-                placeholder="Ex: Empresa XPTO S.A."
-                value={formState.name}
-                onChange={(e) => setFormState({ ...formState, name: e.target.value })}
-              />
-            </div>
-            <div className="space-y-2">
-              <label className="text-sm font-medium">Sindicato Patronal <span className="text-muted-foreground text-xs">(opcional)</span></label>
-              <Input
-                placeholder="Nome do sindicato patronal"
-                value={formState.employerUnionName}
-                onChange={(e) => setFormState({ ...formState, employerUnionName: e.target.value })}
-              />
-            </div>
-            <div className="space-y-2">
-              <label className="text-sm font-medium">CNPJ do Sindicato Patronal <span className="text-muted-foreground text-xs">(opcional)</span></label>
-              <Input
-                placeholder="00.000.000/0000-00"
-                value={formState.employerUnionCnpj}
-                onChange={(e) => setFormState({ ...formState, employerUnionCnpj: e.target.value })}
-                className="font-mono"
-              />
-            </div>
-            <div className="space-y-2">
-              <label className="text-sm font-medium">Sindicato Laboral <span className="text-muted-foreground text-xs">(opcional)</span></label>
+              <label className="text-sm font-medium">Nome do Sindicato Laboral <span className="text-destructive">*</span></label>
               <Input
                 placeholder="Nome do sindicato laboral"
                 value={formState.laborUnionName}
                 onChange={(e) => setFormState({ ...formState, laborUnionName: e.target.value })}
+                required
               />
             </div>
             <div className="space-y-2">
-              <label className="text-sm font-medium">CNPJ do Sindicato Laboral <span className="text-muted-foreground text-xs">(opcional)</span></label>
+              <label className="text-sm font-medium">CNPJ do Sindicato Laboral <span className="text-destructive">*</span></label>
               <Input
                 placeholder="00.000.000/0000-00"
                 value={formState.laborUnionCnpj}
                 onChange={(e) => setFormState({ ...formState, laborUnionCnpj: e.target.value })}
                 className="font-mono"
+                required
               />
             </div>
               </>

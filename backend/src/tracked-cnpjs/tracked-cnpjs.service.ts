@@ -33,8 +33,12 @@ export class TrackedCnpjsService {
   }
 
   async create(dto: CreateTrackedCnpjDto, userId: string) {
+    const baseEmployerUnionCnpj =
+      dto.employerUnionCnpj?.replace(/\D/g, '') ?? dto.cnpj.replace(/\D/g, '');
+    const baseEmployerUnionName = dto.employerUnionName ?? dto.name;
+
     const existing = await this.prisma.trackedCnpj.findUnique({
-      where: { cnpj: dto.cnpj },
+      where: { cnpj: baseEmployerUnionCnpj },
     });
     if (existing) {
       throw new ConflictException('CNPJ is already tracked');
@@ -44,12 +48,10 @@ export class TrackedCnpjsService {
 
     return this.prisma.trackedCnpj.create({
       data: {
-        cnpj: dto.cnpj.replace(/\D/g, ''),
-        name: dto.name,
-        employerUnionName: dto.employerUnionName,
-        employerUnionCnpj: dto.employerUnionCnpj
-          ? dto.employerUnionCnpj.replace(/\D/g, '')
-          : undefined,
+        cnpj: baseEmployerUnionCnpj,
+        name: baseEmployerUnionName,
+        employerUnionName: baseEmployerUnionName,
+        employerUnionCnpj: baseEmployerUnionCnpj,
         laborUnionName: dto.laborUnionName,
         laborUnionCnpj: dto.laborUnionCnpj
           ? dto.laborUnionCnpj.replace(/\D/g, '')
@@ -77,14 +79,22 @@ export class TrackedCnpjsService {
 
   async update(id: string, dto: UpdateTrackedCnpjDto) {
     await this.findOne(id);
+
+    const baseEmployerUnionCnpj = dto.employerUnionCnpj
+      ? dto.employerUnionCnpj.replace(/\D/g, '')
+      : dto.cnpj
+        ? dto.cnpj.replace(/\D/g, '')
+        : undefined;
+    const baseEmployerUnionName = dto.employerUnionName ?? dto.name;
+
     return this.prisma.trackedCnpj.update({
       where: { id },
       data: {
         ...dto,
-        cnpj: dto.cnpj ? dto.cnpj.replace(/\D/g, '') : undefined,
-        employerUnionCnpj: dto.employerUnionCnpj
-          ? dto.employerUnionCnpj.replace(/\D/g, '')
-          : undefined,
+        cnpj: baseEmployerUnionCnpj,
+        name: baseEmployerUnionName,
+        employerUnionName: baseEmployerUnionName,
+        employerUnionCnpj: baseEmployerUnionCnpj,
         laborUnionCnpj: dto.laborUnionCnpj
           ? dto.laborUnionCnpj.replace(/\D/g, '')
           : undefined,
